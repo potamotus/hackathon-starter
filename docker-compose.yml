@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   frontend:
     build:
@@ -9,6 +7,7 @@ services:
       - "3000:3000"
     environment:
       - VITE_API_URL=http://backend:4000
+      - VITE_WS_URL=ws://localhost:4000/ws
       - VITE_MWS_API_KEY=${MWS_API_KEY:-sk-ewgiaPC3A6pPDYHwR8siVA}
     depends_on:
       - backend

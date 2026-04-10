@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { WikiEditor } from './components/Editor/WikiEditor'
+import { CollaborativeEditor } from './components/Editor/CollaborativeEditor'
 import { Sidebar } from './components/Sidebar/Sidebar'
+
+const ENABLE_COLLABORATION = true // Toggle to enable/disable collaboration
 
 interface Page {
   id: string
@@ -53,12 +56,37 @@ function App() {
       />
 
       <main className="flex-1 overflow-hidden">
-        <WikiEditor
-          key={activePage.id}
-          initialContent={activePage.content}
-          onUpdate={handleContentUpdate}
-          pageTitle={activePage.title}
-        />
+        {ENABLE_COLLABORATION ? (
+          <CollaborativeEditor
+            key={activePage.id}
+            documentId={activePage.id}
+            pageTitle={activePage.title}
+            userName={localStorage.getItem('userName') || undefined}
+            onNavigateToPage={(pageName) => {
+              const page = pages.find(p => p.title === pageName)
+              if (page) {
+                setActivePage(page)
+              } else {
+                // Create new page if not found
+                const newPage: Page = {
+                  id: crypto.randomUUID(),
+                  title: pageName,
+                  content: '',
+                  updatedAt: new Date().toISOString(),
+                }
+                setPages([...pages, newPage])
+                setActivePage(newPage)
+              }
+            }}
+          />
+        ) : (
+          <WikiEditor
+            key={activePage.id}
+            initialContent={activePage.content}
+            onUpdate={handleContentUpdate}
+            pageTitle={activePage.title}
+          />
+        )}
       </main>
     </div>
   )

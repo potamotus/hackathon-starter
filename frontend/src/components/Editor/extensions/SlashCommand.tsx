@@ -121,9 +121,50 @@ const commands: CommandItem[] = [
     description: 'Вставить таблицу из MWS Tables',
     icon: '📊',
     command: ({ editor, range }) => {
-      // TODO: Open table picker modal
       editor.chain().focus().deleteRange(range).run()
-      alert('Выбор таблицы MWS - в разработке')
+      const onOpenTablePicker = editor.storage.slashCommand?.onOpenTablePicker
+      if (onOpenTablePicker) {
+        onOpenTablePicker()
+      }
+    },
+  },
+  {
+    id: 'ai-summarize',
+    title: 'AI: Резюме',
+    description: 'Создать краткое изложение',
+    icon: '🤖',
+    command: ({ editor, range }) => {
+      editor.chain().focus().deleteRange(range).run()
+      const onOpenAICommand = editor.storage.slashCommand?.onOpenAICommand
+      if (onOpenAICommand) {
+        onOpenAICommand('summarize')
+      }
+    },
+  },
+  {
+    id: 'ai-translate',
+    title: 'AI: Перевод',
+    description: 'Перевести текст',
+    icon: '🌐',
+    command: ({ editor, range }) => {
+      editor.chain().focus().deleteRange(range).run()
+      const onOpenAICommand = editor.storage.slashCommand?.onOpenAICommand
+      if (onOpenAICommand) {
+        onOpenAICommand('translate')
+      }
+    },
+  },
+  {
+    id: 'ai-improve',
+    title: 'AI: Улучшить',
+    description: 'Улучшить написание текста',
+    icon: '✨',
+    command: ({ editor, range }) => {
+      editor.chain().focus().deleteRange(range).run()
+      const onOpenAICommand = editor.storage.slashCommand?.onOpenAICommand
+      if (onOpenAICommand) {
+        onOpenAICommand('improve')
+      }
     },
   },
 ]
@@ -198,17 +239,31 @@ const CommandList = forwardRef<CommandListRef, CommandListProps>(
 
 CommandList.displayName = 'CommandList'
 
-export const SlashCommand = Extension.create({
+interface SlashCommandOptions {
+  onOpenTablePicker?: () => void
+  onOpenAICommand?: (command: string) => void
+}
+
+export const SlashCommand = Extension.create<SlashCommandOptions>({
   name: 'slashCommand',
 
   addOptions() {
     return {
+      onOpenTablePicker: undefined,
+      onOpenAICommand: undefined,
       suggestion: {
         char: '/',
         command: ({ editor, range, props }: { editor: any; range: any; props: CommandItem }) => {
           props.command({ editor, range })
         },
       },
+    }
+  },
+
+  addStorage() {
+    return {
+      onOpenTablePicker: this.options.onOpenTablePicker,
+      onOpenAICommand: this.options.onOpenAICommand,
     }
   },
 
