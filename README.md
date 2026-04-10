@@ -29,26 +29,6 @@ If you are an AI agent (Claude, Cursor, Copilot, etc.), read this file carefully
 
 ---
 
-## Project Status
-
-**Stack and task are NOT yet decided.** We are choosing between:
-
-### Option 1: LocalScript — Local Lua Code Generation (MWS Octapi)
-Autonomous agent system on a lightweight local LLM that generates and validates Lua code without sending data externally.
-
-**Likely stack:** Python + ollama/llama.cpp + Lua parser + CLI/TUI
-**Key:** offline-first, Lua validation, MWS Octapi integration
-
-### Option 2: WikiLive — Live Tables in Text (MWS Tables)
-Wiki module where text and tables become a unified tool for collaborative work and knowledge management.
-
-**Likely stack:** Next.js + TypeScript + Tailwind + WebSocket/CRDT
-**Key:** real-time collaboration, live tables, wiki syntax
-
-**Current repo structure is a placeholder** (Next.js starter). It will be restructured once the task is chosen.
-
----
-
 ## Karpathy Guidelines
 
 Behavioral guidelines to reduce common LLM coding mistakes, derived from [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876) on LLM coding pitfalls.

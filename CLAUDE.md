@@ -84,8 +84,4 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Use GitHub Issues for task tracking
 
 ### Current Status
-Stack and task TBD. Choosing between:
-1. **LocalScript** — Local Lua code generation via local LLM (MWS Octapi)
-2. **WikiLive** — Live tables in text, real-time wiki collaboration (MWS Tables)
-
-See `compare-tracks.md` for detailed analysis prompt.
+**Track: WikiLive** — Live tables in text, real-time wiki collaboration (MWS Tables)
