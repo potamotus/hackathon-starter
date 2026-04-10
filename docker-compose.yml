@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://backend:4000
+      - VITE_MWS_API_KEY=${MWS_API_KEY:-sk-ewgiaPC3A6pPDYHwR8siVA}
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      - PORT=4000
+      - MWS_API_KEY=${MWS_API_KEY:-sk-ewgiaPC3A6pPDYHwR8siVA}
+      - MWS_API_URL=https://tables.mws.ru/fusion/v1
+      - MWS_GPT_API_KEY=${MWS_GPT_API_KEY:-sk-ewgiaPC3A6pPDYHwR8siVA}
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    command: npm run dev
+
+networks:
+  default:
+    driver: bridge
