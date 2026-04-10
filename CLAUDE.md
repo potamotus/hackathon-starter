@@ -40,7 +40,7 @@ When your changes create orphans:
 - Remove imports/variables/functions that YOUR changes made unused.
 - Don't remove pre-existing dead code unless asked.
 
-The test: Every changed line should trace directly to the user's request.
+The test: every changed line should trace directly to the user's request.
 
 ## 4. Goal-Driven Execution
 
@@ -59,3 +59,33 @@ For multi-step tasks, state a brief plan:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+---
+
+# Project Context
+
+## Hackathon: MTS True Tech 2026 — Certified Turtles
+
+**Repo:** https://github.com/potamotus/mts-true-tech-2026-certified-turtles
+**Deploy:** https://mts-true-hack-certified-turtles.vercel.app
+
+### Team
+- **potamotus** — frontend, creative UI, JS/TS
+- **AsonglefacMillenium** — full-stack engineer, 100+ repos
+- **nikitavivat** — AI Engineer @ AMA Concierge, Python, backend
+- **timsonyk** — collaborator
+
+### Rules
+- Feature branches only, never push to main directly
+- One task = one branch = one PR
+- Build/lint must pass before PR
+- No secrets in commits
+- Conventional commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`
+- Use GitHub Issues for task tracking
+
+### Current Status
+Stack and task TBD. Choosing between:
+1. **LocalScript** — Local Lua code generation via local LLM (MWS Octapi)
+2. **WikiLive** — Live tables in text, real-time wiki collaboration (MWS Tables)
+
+See `compare-tracks.md` for detailed analysis prompt.
