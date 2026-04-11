@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import FastAPI
+
+from certified_turtles.tools.builtins.google_docs import google_docs_capability_dict
 
 from certified_turtles.api.agent import router as agent_router
 from certified_turtles.api.files import router as files_router
@@ -24,5 +28,11 @@ app.include_router(uploads_router, prefix="/api/v1")
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, Any]:
+    """Статус API и возможности (в т.ч. Google Docs), чтобы админ/пользователь видели, что включено."""
+    return {
+        "status": "ok",
+        "capabilities": {
+            "google_docs": google_docs_capability_dict(),
+        },
+    }

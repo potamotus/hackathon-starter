@@ -63,6 +63,17 @@ PROTOCOL_SPEC = r"""
 """.strip()
 
 
+def _tool_names_in_catalog(tool_list: list[dict[str, Any]]) -> set[str]:
+    names: set[str] = set()
+    for t in tool_list:
+        if t.get("type") != "function":
+            continue
+        fn = t.get("function")
+        if isinstance(fn, dict) and isinstance(fn.get("name"), str):
+            names.add(fn["name"])
+    return names
+
+
 def _catalog_block(tool_list: list[dict[str, Any]]) -> str:
     lines: list[str] = ["КАТАЛОГ ФУНКЦИЙ (поле name в calls должно совпадать дословно):"]
     for t in tool_list:
@@ -84,7 +95,13 @@ def _catalog_block(tool_list: list[dict[str, Any]]) -> str:
 
 
 def build_protocol_system_message(tool_list: list[dict[str, Any]]) -> str:
-    return "\n\n".join([PROTOCOL_SPEC, _catalog_block(tool_list)])
+    parts: list[str] = [PROTOCOL_SPEC, _catalog_block(tool_list)]
+    names = _tool_names_in_catalog(tool_list)
+    if any(n.startswith("google_docs_") for n in names):
+        from certified_turtles.tools.builtins.google_docs import agent_system_prompt_google_docs_section
+
+        parts.append(agent_system_prompt_google_docs_section())
+    return "\n\n".join(parts)
 
 
 def _extract_json_object_string(raw: str) -> str | None:

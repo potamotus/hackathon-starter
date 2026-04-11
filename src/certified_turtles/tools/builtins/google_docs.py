@@ -18,6 +18,90 @@ def _parse_document_id(raw: str) -> str:
     return s
 
 
+def google_docs_credentials_path() -> str:
+    return (
+        (os.environ.get("GOOGLE_DOCS_CREDENTIALS_JSON") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or "")
+        .strip()
+    )
+
+
+def google_docs_client_email() -> str | None:
+    path = google_docs_credentials_path()
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError, TypeError):
+        return None
+    em = data.get("client_email") if isinstance(data, dict) else None
+    return em if isinstance(em, str) and "@" in em else None
+
+
+def google_docs_python_libs_ok() -> bool:
+    try:
+        import google.oauth2.service_account  # noqa: F401
+        from googleapiclient.discovery import build  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def google_docs_ready() -> bool:
+    path = google_docs_credentials_path()
+    return bool(path and os.path.isfile(path) and google_docs_python_libs_ok())
+
+
+def google_docs_capability_dict() -> dict[str, Any]:
+    path = google_docs_credentials_path()
+    return {
+        "google_docs_ready": google_docs_ready(),
+        "credentials_path_configured": bool(path),
+        "credentials_file_exists": bool(path and os.path.isfile(path)),
+        "service_account_client_email": google_docs_client_email(),
+        "google_python_packages_installed": google_docs_python_libs_ok(),
+    }
+
+
+def agent_system_prompt_google_docs_section() -> str:
+    """Блок для системного промпта агента: как пользователю пользоваться Docs (тулы уже в каталоге)."""
+    email = google_docs_client_email()
+    ready = google_docs_ready()
+    cred_path = google_docs_credentials_path()
+    lines = [
+        "=== Google Docs (объясни пользователю при вопросах «как подключить документ») ===",
+        "Тулы: google_docs_read — прочитать текст документа; google_docs_append — дописать plain text в конец.",
+    ]
+    if ready and email:
+        lines.append(
+            f"Сервер с ключом: попроси пользователя в Google Doc открыть «Настройки доступа» → добавить email "
+            f"сервис-аккаунта **{email}** с ролью **Редактор**, затем прислать ссылку на документ или document_id из URL."
+        )
+    elif ready and not email:
+        lines.append(
+            "Файл ключа на сервере найден, но из него не прочитан client_email — проверьте, что это JSON service account."
+        )
+    elif google_docs_python_libs_ok() and cred_path and not os.path.isfile(cred_path):
+        lines.append(
+            "Указан GOOGLE_DOCS_CREDENTIALS_JSON, но файла по пути нет (часто в Docker не смонтирован секрет). "
+            "Попроси админа проверить volume и путь внутри контейнера."
+        )
+    elif not google_docs_python_libs_ok():
+        lines.append(
+            "Пакеты Google API не установлены в окружении API (в Docker нужен образ со сборкой `extra google`)."
+        )
+    else:
+        lines.append(
+            "Ключ service account на сервере не настроен. Пользователю: админ задаёт GOOGLE_DOCS_CREDENTIALS_JSON "
+            "на JSON ключ из Google Cloud (IAM → service account → ключи) и перезапускает API."
+        )
+    lines.append(
+        "Если ответ тула содержит google_docs_unavailable или ошибку доступа — кратко повтори шаги с client_email и расшариванием документа."
+    )
+    return "\n".join(lines)
+
+
 def _build_docs_service():
     try:
         from google.oauth2 import service_account
@@ -133,9 +217,10 @@ register_tool(
     ToolSpec(
         name="google_docs_read",
         description=(
-            "Прочитать текст Google Doc по document_id или URL. "
-            "Нужен service account с доступом к документу (расшарить на email из JSON ключа). "
-            "Переменная окружения: GOOGLE_DOCS_CREDENTIALS_JSON."
+            "Google Docs: прочитать весь текст документа (plain text). "
+            "Пользователь должен расшарить документ на email сервис-аккаунта из ключа (поле client_email в JSON); "
+            "document_id — ссылка https://docs.google.com/document/d/…/edit или только ID. "
+            "Админ: GOOGLE_DOCS_CREDENTIALS_JSON=путь к JSON ключу на сервере API."
         ),
         parameters={
             "type": "object",
@@ -155,8 +240,8 @@ register_tool(
     ToolSpec(
         name="google_docs_append",
         description=(
-            "Добавить текст в конец Google Doc (plain text). "
-            "Тот же доступ, что и для google_docs_read. Не подходит для сложного форматирования — только сырой текст."
+            "Google Docs: дописать обычный текст в конец документа (без таблиц/сложной вёрстки). "
+            "Те же правила доступа, что и для google_docs_read: документ расшарен на client_email сервис-аккаунта."
         ),
         parameters={
             "type": "object",

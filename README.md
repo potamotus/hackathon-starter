@@ -116,7 +116,7 @@ Architecture:
 - **`generate_presentation`** — сборка настоящего `.pptx` через `python-pptx`. Файл пишется в `GENERATED_FILES_DIR`, раздаётся через `/files/{name}.pptx`, URL строится из `PUBLIC_API_BASE_URL`.
 - **`read_workspace_file`** — чтение текста из файла, предварительно загруженного через `POST /api/v1/uploads` (поле `file_id`).
 - **`execute_python`** — запуск ограниченного Python (отдельный процесс, таймаут) для анализа данных и графиков (`numpy` / `matplotlib` / `pandas`); графики сохранять в `CT_RUN_OUTPUT_DIR`, ссылки — `GET /files/python_runs/{run_id}/…`.
-- **`google_docs_read` / `google_docs_append`** — чтение текста и дописывание в конец Google Doc через API; нужен JSON service account и расшаривание документа на его email (`GOOGLE_DOCS_CREDENTIALS_JSON`, см. `.env.example`). Зависимости: optional `google` в `pyproject.toml` (в Docker-образе включено).
+- **`google_docs_read` / `google_docs_append`** — чтение текста и дописывание в конец Google Doc через API; нужен JSON service account и расшаривание документа на его email (`GOOGLE_DOCS_CREDENTIALS_JSON`, см. `.env.example`). Зависимости: optional `google` в `pyproject.toml` (в Docker-образе включено). Проверка готовности: `GET /health` → `capabilities.google_docs` (в т.ч. `service_account_client_email` для шаринга). В системном промпте агента при наличии этих тулов добавляется блок с шагами для пользователя.
 
 Под-агенты (`agents/registry.py`, вызываются родительским LLM как `agent_{id}`):
 

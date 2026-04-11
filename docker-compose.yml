@@ -14,10 +14,13 @@ services:
       GENERATED_FILES_DIR: /data/generated
       UPLOADS_DIR: /data/generated/uploads
       PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
-      # Опционально: путь к JSON service account для тулов google_docs_* (файл смонтируйте вручную при необходимости).
+      # Google Docs: JSON service account + расшарить документ на client_email из ключа.
+      # Раскомментируйте обе строки и положите ключ на хост, либо задайте абсолютный путь к файлу на хосте.
       # GOOGLE_DOCS_CREDENTIALS_JSON: /secrets/google-docs-sa.json
     volumes:
       - generated-files:/data/generated
+      # Пример монтирования ключа (рядом с compose: mkdir -p secrets && cp sa.json secrets/google-docs-sa.json):
+      # - ./secrets/google-docs-sa.json:/secrets/google-docs-sa.json:ro
     restart: unless-stopped
 
   open-webui:
