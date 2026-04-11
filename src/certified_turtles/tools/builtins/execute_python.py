@@ -3,13 +3,22 @@ from __future__ import annotations
 import ast
 import json
 import os
+import re
 import subprocess
 import sys
 import uuid
 from typing import Any
 
+from certified_turtles.agent_debug_log import agent_logger, debug_clip
+from certified_turtles.tools.builtins.workspace_file_path import (
+    _looks_like_placeholder_file_id,
+    resolve_workspace_upload_file,
+)
 from certified_turtles.tools.presentation import _storage_dir  # noqa: PLC2701
 from certified_turtles.tools.registry import ToolSpec, register_tool
+from certified_turtles.tools.workspace_storage import uploads_dir
+
+_py_log = agent_logger("execute_python")
 
 _TIMEOUT_SEC = int(os.environ.get("PYTHON_TOOL_TIMEOUT_SEC", "45"))
 
@@ -39,6 +48,9 @@ _ALLOWED_MODULE_PREFIXES: tuple[str, ...] = (
     "numpy",
     "matplotlib",
     "pandas",
+    "openpyxl",
+    "pathlib",
+    "sys",
 )
 
 _FORBIDDEN_CALL_NAMES = frozenset({"eval", "exec", "compile", "__import__", "input"})
@@ -79,7 +91,10 @@ class _Guard(ast.NodeVisitor):
             self.error = f"Запрещённый вызов: {func.id}()"
             return
         if isinstance(func, ast.Name) and func.id == "open":
-            self.error = "Используй pd.read_csv / pathlib или только CT_RUN_OUTPUT_DIR для вывода; прямой open() запрещён."
+            self.error = "Используй pd.read_csv / read_excel по пути строки; прямой open() запрещён."
+            return
+        if isinstance(func, ast.Attribute) and func.attr == "open":
+            self.error = "Метод .open() запрещён; чтение таблиц только через pd.read_csv(path) / pd.read_excel(path, engine='openpyxl')."
             return
         self.generic_visit(node)
 
@@ -98,13 +113,139 @@ def _public_base_url() -> str:
     return os.environ.get("PUBLIC_API_BASE_URL", "http://localhost:8000").rstrip("/")
 
 
+def _normalize_llm_python(code: str) -> str:
+    """LLM иногда присылает весь скрипт одной строкой с буквальными \n вместо переводов строки."""
+    out = code
+    if "\n" not in out and "\\n" in out:
+        out = out.replace("\\r\\n", "\n").replace("\\n", "\n")
+    if "\t" not in out and "\\t" in out:
+        out = out.replace("\\t", "\t")
+    return out
+
+
+def _infer_file_id_from_code(code: str) -> str | None:
+    """Если модель не передала file_id аргументом, пробуем вытащить его из кода."""
+    try:
+        root = uploads_dir()
+        names = sorted(p.name for p in root.iterdir() if p.is_file())
+    except OSError:
+        return None
+    hits = [name for name in names if name in code]
+    uniq = sorted(set(hits))
+    if len(uniq) == 1:
+        return uniq[0]
+    return None
+
+
+def _file_arg_constant(arg_name: str) -> str:
+    if arg_name == "file_id":
+        return "CT_DATA_FILE_ABSPATH"
+    suffix = re.sub(r"[^A-Za-z0-9]+", "_", arg_name.removeprefix("file_id_")).strip("_").upper() or "EXTRA"
+    return f"CT_DATA_FILE_ABSPATH_{suffix}"
+
+
+def _collect_bound_files(arguments: dict[str, Any], code: str) -> dict[str, tuple[str, str]]:
+    bound: dict[str, tuple[str, str]] = {}
+    for key, value in arguments.items():
+        if key != "file_id" and not key.startswith("file_id_"):
+            continue
+        fid = str(value or "").strip()
+        if not fid:
+            continue
+        if _looks_like_placeholder_file_id(fid):
+            raise ValueError("file_id_placeholder")
+        resolved = resolve_workspace_upload_file(fid)
+        if resolved is None:
+            raise FileNotFoundError(fid)
+        bound[key] = (fid, str(resolved[1].resolve()))
+    if bound:
+        return bound
+    inferred = _infer_file_id_from_code(code)
+    if not inferred:
+        return {}
+    resolved = resolve_workspace_upload_file(inferred)
+    if resolved is None:
+        return {}
+    return {"file_id": (inferred, str(resolved[1].resolve()))}
+
+
+def _rewrite_code_with_bound_files(code: str, bound: dict[str, tuple[str, str]]) -> str:
+    """Чинит самые частые артефакты LLM вокруг file_id, не ломая остальной код."""
+    out = code
+    for arg_name, (fid, _) in bound.items():
+        const_name = _file_arg_constant(arg_name)
+        out = re.sub(
+            rf"workspace_file_path\(\s*(['\"]){re.escape(fid)}\1\s*\)\s*\[\s*(['\"])absolute_path\2\s*\]",
+            const_name,
+            out,
+        )
+        out = re.sub(
+            rf"(pd\.read_(?:csv|excel)\(\s*)(['\"]){re.escape(fid)}\2",
+            rf"\1_ct_path('{fid}')",
+            out,
+        )
+        out = re.sub(
+            rf"(?m)^(\s*[A-Za-z_][A-Za-z0-9_]*\s*=\s*)(['\"]){re.escape(fid)}\2(\s*(?:#.*)?)$",
+            rf"\1_ct_path('{fid}')\3",
+            out,
+        )
+    out = re.sub(r"\bCT_DATA_FILE_ABSPATH\s*\+\s*([A-Za-z_][A-Za-z0-9_]*)", r"_ct_path(\1)", out)
+    out = re.sub(r"\bCT_DATA_FILE_ABSPATH\s*\+\s*(['\"][^'\"]+['\"])", r"_ct_path(\1)", out)
+    out = out.replace("workspace_file_path(CT_DATA_FILE_ABSPATH)", "workspace_file_path(_ct_path(CT_DATA_FILE_ABSPATH))")
+    return out
+
+
 def _handle_execute_python(arguments: dict[str, Any]) -> str:
     code = arguments.get("code")
     if not isinstance(code, str) or not code.strip():
         return json.dumps({"error": "Нужен непустой параметр code (Python)."}, ensure_ascii=False)
 
+    code = _normalize_llm_python(code)
+    data_preamble = ""
+    try:
+        bound_files = _collect_bound_files(arguments, code)
+    except ValueError:
+        return json.dumps(
+            {
+                "error": "file_id_placeholder",
+                "detail": (
+                    "В file_id тула execute_python нужен реальный идентификатор из file_id=\"…\" в [CT: …], "
+                    "а не шаблон в квадратных скобках."
+                ),
+            },
+            ensure_ascii=False,
+        )
+    except FileNotFoundError:
+        return json.dumps(
+            {"error": "file_not_found", "detail": "Нет файла для file_id; сначала workspace_file_path или загрузка."},
+            ensure_ascii=False,
+        )
+
+    if bound_files:
+        code = _rewrite_code_with_bound_files(code, bound_files)
+        primary_path = bound_files.get("file_id", next(iter(bound_files.values())))[1]
+        mapping = {fid: path for fid, path in bound_files.values()}
+        constants = "\n".join(
+            f"{_file_arg_constant(arg_name)} = {path!r}" for arg_name, (_, path) in bound_files.items()
+        )
+        data_preamble = (
+            f"CT_DATA_FILE_ABSPATH = {primary_path!r}\n"
+            f"{constants}\n"
+            f"CT_FILE_ID_TO_PATH = {mapping!r}\n"
+            "CT_FILE_PATH_TO_ID = {v: k for k, v in CT_FILE_ID_TO_PATH.items()}\n"
+            "def _ct_path(value):\n"
+            "    return CT_FILE_ID_TO_PATH.get(value, value) if isinstance(value, str) else value\n"
+            "def workspace_file_path(file_id):\n"
+            "    path = _ct_path(file_id)\n"
+            "    if not isinstance(path, str):\n"
+            "        raise FileNotFoundError(f'Unsupported file handle: {file_id!r}')\n"
+            "    real_file_id = CT_FILE_PATH_TO_ID.get(path, file_id)\n"
+            "    return {'file_id': real_file_id, 'absolute_path': path}\n"
+        )
+
     err = _validate_code(code)
     if err:
+        _py_log.debug("validation_failed detail=%s code_preview=\n%s", err, debug_clip(code))
         return json.dumps({"error": "validation_failed", "detail": err}, ensure_ascii=False)
 
     out_root = _storage_dir() / "python_runs"
@@ -123,9 +264,12 @@ def _handle_execute_python(arguments: dict[str, Any]) -> str:
         f"CT_RUN_OUTPUT_DIR = {run_dir_str!r}\n"
         "os.makedirs(CT_RUN_OUTPUT_DIR, exist_ok=True)\n"
         "os.environ.setdefault('MPLBACKEND', 'Agg')\n"
+        + data_preamble
     )
     with open(script_path, "w", encoding="utf-8") as f:
         f.write(preamble + "\n" + code)
+
+    _py_log.debug("run start run_id=%s script=%s code=\n%s", run_id, script_path, debug_clip(code))
 
     env = os.environ.copy()
     env["MPLBACKEND"] = "Agg"
@@ -142,10 +286,19 @@ def _handle_execute_python(arguments: dict[str, Any]) -> str:
             timeout=_TIMEOUT_SEC,
         )
     except subprocess.TimeoutExpired:
+        _py_log.debug("run timeout run_id=%s after %ss", run_id, _TIMEOUT_SEC)
         return json.dumps(
             {"error": "timeout", "detail": f"Лимит {_TIMEOUT_SEC}s"},
             ensure_ascii=False,
         )
+
+    _py_log.debug(
+        "run end run_id=%s returncode=%s stdout=\n%s\nstderr=\n%s",
+        run_id,
+        proc.returncode,
+        debug_clip(proc.stdout),
+        debug_clip(proc.stderr),
+    )
 
     artifacts: list[dict[str, str]] = []
     for name in sorted(os.listdir(run_dir_str)):
@@ -176,9 +329,13 @@ register_tool(
         name="execute_python",
         description=(
             "Серверное выполнение Python: единственный способ реально запустить код здесь (анализ, расчёты, симуляции, графики). "
-            "Передай полный скрипт в `code`; процесс изолирован, таймаут; разрешены numpy/matplotlib/pandas и др. из белого списка, "
-            "без open/eval/exec и произвольных import. "
-            "Графики: plt.savefig(os.path.join(CT_RUN_OUTPUT_DIR, 'plot.png')); в ответе — stdout/stderr и URL артефактов."
+            "Полный скрипт в `code`; таймаут; импорты только из белого списка; запрещены open(), .open(), eval/exec. "
+            "Таблицы: опционально передай `file_id` (как у workspace_file_path) — в скрипте будет константа CT_DATA_FILE_ABSPATH; "
+            "затем import pandas as pd; df = pd.read_csv(CT_DATA_FILE_ABSPATH, encoding='utf-8', on_bad_lines='skip'). "
+            "Либо сначала тул workspace_file_path и подставь absolute_path из JSON в read_csv. "
+            "Не вызывай workspace_file_path() внутри Python — такой функции нет. Не подставляй плейсхолдеры вместо file_id. "
+            "Если returncode не 0 — читай stderr, исправь код и вызови execute_python снова. "
+            "Графики сохраняй в CT_RUN_OUTPUT_DIR (см. pathlib.Path(CT_RUN_OUTPUT_DIR) / 'plot.png'). Ответ тула: stdout/stderr, артефакты."
         ),
         parameters={
             "type": "object",
@@ -186,6 +343,13 @@ register_tool(
                 "code": {
                     "type": "string",
                     "description": "Полный Python-скрипт (без интерактива).",
+                },
+                "file_id": {
+                    "type": "string",
+                    "description": (
+                        "Необязательно: реальный file_id из [CT:…] или ответа workspace_file_path; "
+                        "тогда в коде доступна строка CT_DATA_FILE_ABSPATH."
+                    ),
                 },
             },
             "required": ["code"],

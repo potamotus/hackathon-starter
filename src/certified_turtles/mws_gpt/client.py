@@ -3,12 +3,16 @@ from __future__ import annotations
 import json
 import os
 import socket
+import time
 import urllib.error
 import urllib.request
 from typing import Any
 
+from certified_turtles.agent_debug_log import agent_logger, debug_clip
 
 DEFAULT_BASE_URL = "https://api.gpt.mws.ru"
+
+_mws_log = agent_logger("mws")
 
 
 class MWSGPTError(Exception):
@@ -62,39 +66,59 @@ class MWSGPTClient:
         headers = self._headers(json_body=payload is not None)
         if payload is not None:
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             timeout_sec = int(os.environ.get("MWS_HTTP_TIMEOUT_SEC", "120"))
         except (TypeError, ValueError):
             timeout_sec = 120
         timeout_sec = max(30, min(600, timeout_sec))
         try:
-            with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
-                raw = resp.read().decode("utf-8")
-        except TimeoutError as e:
-            raise MWSGPTError(
-                f"Таймаут MWS при {method} {path} (лимит {timeout_sec}s чтения ответа). "
-                "Попробуйте другую модель, уменьшите контекст или max_tool_rounds.",
-                status=504,
-                body=str(e),
-            ) from e
-        except socket.timeout as e:
-            raise MWSGPTError(
-                f"Таймаут сокета MWS при {method} {path} ({timeout_sec}s).",
-                status=504,
-                body=str(e),
-            ) from e
-        except urllib.error.HTTPError as e:
-            raw = e.read().decode("utf-8", errors="replace")
-            raise MWSGPTError(e.reason or str(e), status=e.code, body=raw) from e
-        except urllib.error.URLError as e:
-            reason = getattr(e, "reason", e)
-            msg = repr(reason) if reason is not None else str(e)
-            raise MWSGPTError(
-                f"Сеть при обращении к MWS ({method} {path}): {msg}",
-                status=502,
-                body=str(e),
-            ) from e
+            retries = int(os.environ.get("MWS_HTTP_RETRIES", "2"))
+        except (TypeError, ValueError):
+            retries = 2
+        retries = max(0, min(5, retries))
+
+        raw: str | None = None
+        for attempt in range(retries + 1):
+            req = urllib.request.Request(url, data=data, headers=headers, method=method)
+            try:
+                with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+                    raw = resp.read().decode("utf-8")
+                break
+            except ConnectionError as e:
+                if attempt >= retries:
+                    raise MWSGPTError(
+                        f"MWS разорвал соединение ({method} {path}) после {retries + 1} попыток: {e!s}. "
+                        "Проверьте сеть, VPN, лимиты API и размер запроса. "
+                        "Для агента: компактный каталог тулов включён по умолчанию (CT_AGENT_COMPACT_TOOL_CATALOG); "
+                        "или используйте /v1/plain для чата без тулов.",
+                        status=502,
+                        body=str(e),
+                    ) from e
+                time.sleep(0.35 * (attempt + 1))
+            except TimeoutError as e:
+                raise MWSGPTError(
+                    f"Таймаут MWS при {method} {path} (лимит {timeout_sec}s чтения ответа). "
+                    "Попробуйте другую модель, уменьшите контекст или max_tool_rounds.",
+                    status=504,
+                    body=str(e),
+                ) from e
+            except socket.timeout as e:
+                raise MWSGPTError(
+                    f"Таймаут сокета MWS при {method} {path} ({timeout_sec}s).",
+                    status=504,
+                    body=str(e),
+                ) from e
+            except urllib.error.HTTPError as e:
+                err_body = e.read().decode("utf-8", errors="replace")
+                raise MWSGPTError(e.reason or str(e), status=e.code, body=err_body) from e
+            except urllib.error.URLError as e:
+                reason = getattr(e, "reason", e)
+                msg = repr(reason) if reason is not None else str(e)
+                raise MWSGPTError(
+                    f"Сеть при обращении к MWS ({method} {path}): {msg}",
+                    status=502,
+                    body=str(e),
+                ) from e
 
         if not raw:
             return None
@@ -115,7 +139,15 @@ class MWSGPTClient:
         """POST /v1/chat/completions. В `extra` можно передать tools, tool_choice, response_format и др."""
         body: dict[str, Any] = {"model": model, "messages": messages}
         body.update(extra)
-        return self._request("POST", "/v1/chat/completions", payload=body)
+        _mws_log.debug(
+            "POST /v1/chat/completions model=%s messages=%s extra_keys=%s",
+            model,
+            len(messages),
+            sorted(extra.keys()),
+        )
+        out = self._request("POST", "/v1/chat/completions", payload=body)
+        _mws_log.debug("POST /v1/chat/completions response preview=\n%s", debug_clip(json.dumps(out, ensure_ascii=False)))
+        return out
 
     def completions(self, model: str, prompt: str, **extra: Any) -> Any:
         body: dict[str, Any] = {"model": model, "prompt": prompt}

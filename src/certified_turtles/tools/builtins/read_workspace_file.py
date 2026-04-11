@@ -41,7 +41,8 @@ register_tool(
         name="read_workspace_file",
         description=(
             "Прочитать текст из файла, загруженного в рабочую область (POST /api/v1/uploads). "
-            "Передай file_id из ответа загрузки. Лимит ~512k символов; для больших файлов используй execute_python."
+            "Передай file_id из ответа загрузки. Лимит ~512k символов. "
+            "Для .xlsx и больших .csv сначала `workspace_file_path`, затем pandas в `execute_python`."
         ),
         parameters={
             "type": "object",

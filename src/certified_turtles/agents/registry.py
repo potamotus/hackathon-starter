@@ -25,6 +25,7 @@ RESEARCH_AGENT_ID = "research"
 WRITER_AGENT_ID = "writer"
 DEEP_RESEARCH_AGENT_ID = "deep_research"
 CODER_AGENT_ID = "coder"
+DATA_ANALYST_AGENT_ID = "data_analyst"
 
 SUB_AGENTS: dict[str, SubAgentSpec] = {
     RESEARCH_AGENT_ID: SubAgentSpec(
@@ -75,12 +76,35 @@ SUB_AGENTS: dict[str, SubAgentSpec] = {
         system_prompt=(
             "Ты под-агент «код и данные». Решай задачу через серверное выполнение Python: вызывай `execute_python` "
             "с полным скриптом в аргументе `code` (один вызов — один запуск процесса). "
-            "Для файлов из рабочей области пользователя используй `read_workspace_file` с `file_id` из контекста загрузки. "
+            "Для табличных файлов сначала `workspace_file_path` с `file_id`, затем pandas по полю `absolute_path`. "
+            "Для небольших текстовых файлов можно `read_workspace_file`. "
             "По результатам тулов формируй понятный ответ пользователю; ссылки на графики и файлы копируй из JSON ответа."
         ),
-        tool_names=("execute_python", "read_workspace_file"),
+        tool_names=("execute_python", "read_workspace_file", "workspace_file_path"),
         max_inner_rounds=12,
         blurb="Запуск Python, графики, разбор загруженных файлов.",
+    ),
+    DATA_ANALYST_AGENT_ID: SubAgentSpec(
+        id=DATA_ANALYST_AGENT_ID,
+        system_prompt=(
+            "Ты под-агент «аналитика табличных данных» (без отдельных метрик/дашбордов — только вывод из кода).\n\n"
+            "Рабочий цикл:\n"
+            "1. Узнай `file_id`: в тексте user после нормализации чата (вложение сохраняется на сервер автоматически) "
+            "или из явной загрузки POST /api/v1/uploads.\n"
+            "2. Вызови `workspace_file_path` с этим file_id и возьми `absolute_path`, **или** сразу `execute_python` "
+            "с тем же `file_id` в аргументах тула и в `code`: "
+            "`import pandas as pd; df = pd.read_csv(CT_DATA_FILE_ABSPATH, encoding='utf-8', on_bad_lines='skip')` "
+            "(для .xlsx — read_excel(..., engine='openpyxl') с тем же путём из absolute_path).\n"
+            "3. Выполни анализ (агрегации, фильтры, сводные, графики), выведи итоги через print() в stdout.\n"
+            "4. Несколько шагов — последовательные вызовы execute_python.\n\n"
+            "Ограничения кода: без open() и .open(); только разрешённые импорты; чтение CSV через pd.read_csv(path, encoding='utf-8', on_bad_lines='skip'). "
+            "Если execute_python вернул returncode≠0 — исправь код по stderr и повтори вызов. "
+            "Графики сохраняй в CT_RUN_OUTPUT_DIR и давай пользователю URL из поля artifacts.\n\n"
+            "В финальном ответе кратко резюмируй выводы по цифрам из stdout; не выдумывай то, чего нет в выводе тулов."
+        ),
+        tool_names=("workspace_file_path", "execute_python", "read_workspace_file"),
+        max_inner_rounds=14,
+        blurb="CSV/XLSX: путь к файлу + Python, результат в stdout/артефактах.",
     ),
 }
 

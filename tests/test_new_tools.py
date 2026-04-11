@@ -99,6 +99,73 @@ def test_generate_presentation_rejects_empty_slides(tmp_path, monkeypatch):
     assert "error" in json.loads(out)
 
 
+def test_generate_presentation_section_and_thanks_allow_empty_bullets(tmp_path, monkeypatch):
+    monkeypatch.setenv("GENERATED_FILES_DIR", str(tmp_path))
+    monkeypatch.setenv("PUBLIC_API_BASE_URL", "http://test.local")
+    out = run_primitive_tool(
+        "generate_presentation",
+        {
+            "title": "Demo",
+            "subtitle": "2026",
+            "slides": [
+                {"title": "Введение", "kind": "section", "bullets": []},
+                {"title": "Детали", "bullets": ["a", "b"]},
+                {"title": "Спасибо", "kind": "thanks", "bullets": []},
+            ],
+        },
+    )
+    data = json.loads(out)
+    assert "error" not in data
+    assert data["slide_count"] == 4
+
+
+def test_generate_presentation_image_requires_url(tmp_path, monkeypatch):
+    monkeypatch.setenv("GENERATED_FILES_DIR", str(tmp_path))
+    out = run_primitive_tool(
+        "generate_presentation",
+        {
+            "title": "x",
+            "slides": [{"title": "Pic", "kind": "image", "bullets": ["описание"]}],
+        },
+    )
+    assert "error" in json.loads(out)
+
+
+def test_generate_presentation_image_slide_allows_empty_bullets(tmp_path, monkeypatch):
+    monkeypatch.setenv("GENERATED_FILES_DIR", str(tmp_path))
+    monkeypatch.setenv("PUBLIC_API_BASE_URL", "http://test.local")
+    tiny_png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489"
+        "0000000a49444154789c63000100000500001d0d4e120000000049454e44ae426082"
+    )
+
+    def _fake_download(url: str, **kwargs):
+        assert "http" in url
+        return tiny_png
+
+    monkeypatch.setattr(
+        "certified_turtles.tools.presentation._download_image_bytes",
+        _fake_download,
+    )
+    out = run_primitive_tool(
+        "generate_presentation",
+        {
+            "title": "Deck",
+            "slides": [
+                {
+                    "title": "Скриншот",
+                    "kind": "image",
+                    "image_url": "https://example.com/x.png",
+                    "bullets": [],
+                },
+            ],
+        },
+    )
+    data = json.loads(out)
+    assert "error" not in data, data
+    assert data["slide_count"] == 2
+
+
 def test_files_route_serves_generated_pptx(tmp_path, monkeypatch):
     monkeypatch.setenv("GENERATED_FILES_DIR", str(tmp_path))
     monkeypatch.setenv("PUBLIC_API_BASE_URL", "http://test.local")

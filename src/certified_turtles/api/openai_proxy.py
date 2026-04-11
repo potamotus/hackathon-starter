@@ -9,10 +9,17 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from certified_turtles.agents.json_agent_protocol import (
+    extract_user_visible_assistant_text,
+    message_text_content,
+    patch_completion_assistant_markdown,
+)
+from certified_turtles.agent_debug_log import agent_logger, debug_clip, summarize_messages
 from certified_turtles.mws_gpt.client import MWSGPTError, http_status_for_mws_error
 from certified_turtles.services.llm import LLMService, clamp_agent_tool_rounds
 
 router = APIRouter(tags=["openai-proxy"])
+_proxy_log = agent_logger("openai_proxy")
 
 _PASS_THROUGH_IGNORE = {
     "model",
@@ -53,13 +60,30 @@ async def list_models_plain_prefix() -> Any:
     return await list_models()
 
 
+def _completion_with_visible_markdown(completion: dict[str, Any]) -> dict[str, Any]:
+    """Убирает обёртку JSON-протокола и служебные поля message — Open WebUI показывает markdown."""
+    choices = completion.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return completion
+    ch0 = choices[0]
+    if not isinstance(ch0, dict):
+        return completion
+    msg = ch0.get("message")
+    if not isinstance(msg, dict):
+        return completion
+    raw = message_text_content(msg)
+    visible = extract_user_visible_assistant_text(raw)
+    return patch_completion_assistant_markdown(completion, visible)
+
+
 def _final_assistant_content(completion: dict[str, Any]) -> str:
     choices = completion.get("choices") or []
     if not choices:
         return ""
     msg = (choices[0] or {}).get("message") or {}
-    content = msg.get("content")
-    return content if isinstance(content, str) else ""
+    if not isinstance(msg, dict):
+        return ""
+    return extract_user_visible_assistant_text(message_text_content(msg))
 
 
 def _sse_stream(model: str, completion: dict[str, Any]):
@@ -94,6 +118,53 @@ def _wants_plain_chat(body: dict[str, Any]) -> bool:
     return v is False
 
 
+def _openwebui_meta_task_forces_plain(messages: Any) -> bool:
+    """Open WebUI шлёт отдельные POST с одним user и префиксом «### Task:» (заголовок чата, follow-up, web search …).
+
+    Их нельзя гонять через JSON-протокол агента — модель отвечает обычным текстом → ложные «parse failed» в логах.
+    Основной RAG-ответ («…provided context…» + при необходимости <source>) оставляем на агенте с тулами.
+    """
+    if not isinstance(messages, list) or len(messages) != 1:
+        return False
+    m = messages[0]
+    if not isinstance(m, dict) or m.get("role") != "user":
+        return False
+    text = message_text_content(m)
+    if not text.lstrip().startswith("### Task:"):
+        return False
+    low = text.lower()
+    if "<source" in low:
+        return False
+    if "respond to the user query using the provided context" in low:
+        return False
+    return True
+
+
+def _openwebui_tool_router_forces_plain(messages: Any) -> bool:
+    """Open WebUI иногда шлёт отдельный запрос-роутер вида `Available Tools: []` + `Query: ...`.
+
+    Это не пользовательский чат и не место для нашего agent-loop: там нет file_id/вложений/RAG,
+    а конфликт системных промптов заставляет модель бессмысленно крутить workspace_file_path с пустым id.
+    """
+    if not isinstance(messages, list) or len(messages) != 2:
+        return False
+    sys_msg, user_msg = messages
+    if not isinstance(sys_msg, dict) or not isinstance(user_msg, dict):
+        return False
+    if sys_msg.get("role") != "system" or user_msg.get("role") != "user":
+        return False
+    sys_text = message_text_content(sys_msg)
+    user_text = message_text_content(user_msg)
+    sys_low = sys_text.lower()
+    if "available tools:" not in sys_low:
+        return False
+    if "choose and return the correct tool" not in sys_low:
+        return False
+    if not user_text.lstrip().lower().startswith("query:"):
+        return False
+    return True
+
+
 async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool) -> Any:
     model = body.get("model")
     messages = body.get("messages")
@@ -107,7 +178,22 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
     extra = {k: v for k, v in body.items() if k not in _PASS_THROUGH_IGNORE}
 
     svc = _service()
-    plain = force_plain or _wants_plain_chat(body)
+    ow_meta_plain = _openwebui_meta_task_forces_plain(messages)
+    ow_tool_router_plain = _openwebui_tool_router_forces_plain(messages)
+    plain = force_plain or _wants_plain_chat(body) or ow_meta_plain or ow_tool_router_plain
+    if ow_meta_plain and not force_plain and not _wants_plain_chat(body):
+        _proxy_log.debug("openwebui auxiliary ### Task -> plain chat (no agent JSON protocol)")
+    if ow_tool_router_plain and not force_plain and not _wants_plain_chat(body):
+        _proxy_log.debug("openwebui Available Tools router -> plain chat (no agent JSON protocol)")
+    _proxy_log.debug(
+        "chat_completions request model=%s plain=%s stream=%s max_tool_rounds=%s extra_keys=%s\nmessages_in=\n%s",
+        model,
+        plain,
+        stream,
+        max_tool_rounds,
+        sorted(extra.keys()),
+        summarize_messages(messages, preview=400) if isinstance(messages, list) else str(type(messages)),
+    )
     try:
         if plain:
             completion = await asyncio.to_thread(svc.chat_plain, model, messages, **extra)
@@ -128,6 +214,11 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
+    _proxy_log.debug(
+        "chat_completions response (visible for UI) preview=\n%s",
+        debug_clip(_final_assistant_content(completion)),
+    )
+    completion = _completion_with_visible_markdown(completion)
     if not stream:
         return completion
     return StreamingResponse(_sse_stream(model, completion), media_type="text/event-stream")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
@@ -13,8 +14,14 @@ logger = logging.getLogger(__name__)
 _SCOPES = ("https://www.googleapis.com/auth/documents",)
 
 
+def _normalize_document_id_input(raw: str) -> str:
+    """Убирает HTML-сущности и лишние кавычки (модель иногда вставляет &quot; в JSON)."""
+    s = html.unescape(raw.strip()).strip().strip('"').strip("'")
+    return s
+
+
 def _parse_document_id(raw: str) -> str:
-    s = raw.strip()
+    s = _normalize_document_id_input(raw)
     m = re.search(r"/d/([a-zA-Z0-9_-]+)", s)
     if m:
         return m.group(1)

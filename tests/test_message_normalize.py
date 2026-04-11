@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import base64
+
+import pytest
+
 from certified_turtles.services.message_normalize import normalize_chat_messages, normalize_message_content
 
 
@@ -23,3 +27,70 @@ def test_normalize_chat_messages():
     msgs = [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]
     out = normalize_chat_messages(msgs)
     assert out[0]["content"] == "hi"
+
+
+@pytest.fixture
+def uploads_tmp(monkeypatch, tmp_path):
+    monkeypatch.setenv("UPLOADS_DIR", str(tmp_path / "up"))
+    return tmp_path / "up"
+
+
+def test_file_attachment_data_url_saved_to_workspace(uploads_tmp):
+    raw = b"a,b\n1,2\n"
+    b64 = base64.b64encode(raw).decode()
+    content = [
+        {"type": "text", "text": "анализ"},
+        {
+            "type": "file",
+            "filename": "demo.csv",
+            "file": {"data": f"data:text/csv;base64,{b64}"},
+        },
+    ]
+    out = normalize_message_content(content)
+    assert isinstance(out, str)
+    assert "file_id:" in out
+    assert "demo.csv" in out or "оригинальное имя" in out
+    saved = list(uploads_tmp.iterdir())
+    assert len(saved) == 1
+    assert saved[0].read_bytes() == raw
+
+
+def test_file_attachment_raw_base64_saved(uploads_tmp):
+    raw = b"x,y\n3,4\n"
+    b64 = base64.b64encode(raw).decode()
+    content = [{"type": "file", "filename": "t.csv", "file": b64}]
+    out = normalize_message_content(content)
+    assert isinstance(out, str)
+    assert "file_id:" in out
+
+
+def test_open_webui_rag_source_hydrated(uploads_tmp):
+    body = "a,b\n1,2\n"
+    text = (
+        '### Context\n<source id="1" name="demo.csv">'
+        f"{body}"
+        "</source>\nQuery: analyze"
+    )
+    out = normalize_message_content(text)
+    assert "file_id=" in out
+    assert "[CT: RAG-источник" in out
+    saved = list(uploads_tmp.iterdir())
+    assert len(saved) == 1
+    assert "1,2" in saved[0].read_text(encoding="utf-8")
+
+
+def test_open_webui_rag_ignores_instruction_example_source(uploads_tmp):
+    text = (
+        'Use tags like <source id="1"> in examples only.\n'
+        "<context>"
+        '<source id="7" name="demo.csv">date: 2026-01-07\nregion: Москва\nsales: 100</source>'
+        "</context>\n"
+        "Query: analyze"
+    )
+    out = normalize_message_content(text)
+    assert 'Use tags like <source id="1">' in out
+    assert 'file_id="' in out
+    saved = list(uploads_tmp.iterdir())
+    assert len(saved) == 1
+    assert saved[0].suffix == ".csv"
+    assert "date,region,sales" in saved[0].read_text(encoding="utf-8")

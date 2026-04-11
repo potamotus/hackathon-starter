@@ -3,6 +3,18 @@ services:
   # Все чат-запросы из UI проходят через агент-цикл, чтобы в них автоматически попадали тулы.
   api:
     build: .
+    command:
+      - uv
+      - run
+      - uvicorn
+      - certified_turtles.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --log-level
+      - error
+      - --no-access-log
     ports:
       - "8000:8000"
     env_file:
@@ -14,6 +26,9 @@ services:
       GENERATED_FILES_DIR: /data/generated
       UPLOADS_DIR: /data/generated/uploads
       PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
+      # Подробный трейс агента на stderr контейнера: [agent-debug] … (uvicorn остаётся --log-level error).
+      CT_AGENT_DEBUG: ${CT_AGENT_DEBUG:-}
+      CT_AGENT_DEBUG_MAX_CHARS: ${CT_AGENT_DEBUG_MAX_CHARS:-}
       # Google Docs: JSON service account + расшарить документ на client_email из ключа.
       # Раскомментируйте обе строки и положите ключ на хост, либо задайте абсолютный путь к файлу на хосте.
       # GOOGLE_DOCS_CREDENTIALS_JSON: /secrets/google-docs-sa.json
@@ -55,6 +70,10 @@ services:
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-ru-RU}
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:-change-me-in-production}
       WEBUI_URL: ${WEBUI_URL:-http://localhost:3000}
+      # Только ошибки UI; статус запросов к MWS смотри в логах сервиса api ([backend]).
+      GLOBAL_LOG_LEVEL: ERROR
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+      TRANSFORMERS_VERBOSITY: error
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

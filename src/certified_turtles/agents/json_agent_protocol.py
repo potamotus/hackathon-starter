@@ -9,10 +9,100 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import os
 import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Модели с «размышлением» часто оборачивают его в теги; мешают извлечению JSON.
+_STRIP_REASONING_BLOCKS = re.compile(
+    r"(?:"
+    r"<(?:redacted_)?thinking>[\s\S]*?</(?:redacted_)?thinking>"
+    r"|<think>[\s\S]*?</think>"
+    r"|<redacted_reasoning>[\s\S]*?</redacted_reasoning>"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _strip_model_reasoning_noise(raw: str) -> str:
+    s = _STRIP_REASONING_BLOCKS.sub("", raw)
+    return s.strip()
+
+
+def _iter_balanced_json_objects(s: str) -> list[str]:
+    """Все подстроки верхнего уровня `{...}` с учётом строк и экранирования в JSON."""
+    n = len(s)
+    out: list[str] = []
+    i = 0
+    while i < n:
+        if s[i] != "{":
+            i += 1
+            continue
+        start = i
+        depth = 0
+        in_string = False
+        escape = False
+        j = i
+        closed = False
+        while j < n:
+            c = s[j]
+            if escape:
+                escape = False
+                j += 1
+                continue
+            if in_string:
+                if c == "\\":
+                    escape = True
+                elif c == '"':
+                    in_string = False
+                j += 1
+                continue
+            if c == '"':
+                in_string = True
+                j += 1
+                continue
+            if c == "{":
+                depth += 1
+                j += 1
+                continue
+            if c == "}":
+                depth -= 1
+                j += 1
+                if depth == 0:
+                    out.append(s[start:j])
+                    i = j
+                    closed = True
+                    break
+                continue
+            j += 1
+        if not closed:
+            i = start + 1
+    return out
+
+
+def _extract_protocol_json_candidates(raw: str) -> list[str]:
+    """Возможные JSON-тела протокола: блоки ```json, затем сбалансированные объекты (с конца к началу)."""
+    s = _strip_model_reasoning_noise(raw)
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def add(blob: str) -> None:
+        b = blob.strip()
+        if not b or b in seen:
+            return
+        seen.add(b)
+        candidates.append(b)
+
+    for m in re.finditer(r"```(?:json)?\s*([\s\S]*?)\s*```", s, re.IGNORECASE):
+        inner = m.group(1).strip()
+        if inner.startswith("{"):
+            add(inner)
+    balanced = _iter_balanced_json_objects(s)
+    for obj in reversed(balanced):
+        add(obj)
+    return candidates
 
 
 def message_text_content(msg: dict[str, Any]) -> str:
@@ -37,6 +127,13 @@ def message_text_content(msg: dict[str, Any]) -> str:
 # Сообщения user с этим префиксом — служебные (результаты тулов), не текст пользователя чата.
 PROTOCOL_USER_PREFIX = "[CT_PROTO_JSON]"
 
+# Один «ремонтный» user-ход при ответе модели без парсящегося JSON (иначе тулы не вызываются).
+PROTOCOL_JSON_REPAIR_USER = (
+    "[CT_PROTO_JSON_REPAIR] Предыдущий ответ не распознан как JSON протокола — тулы отключены. "
+    "Повтори ответ ОДНИМ JSON-объектом с ключами assistant_markdown и calls, без текста до/после и без ```. "
+    "Если речь о таблице и в истории есть file_id (строка [CT:…]) — вызови workspace_file_path и execute_python."
+)
+
 # Зашитый контракт (ключи и смысл полей — не переименовывать без правок парсера и тестов).
 PROTOCOL_SPEC = r"""
 ОБЯЗАТЕЛЬНЫЙ ФОРМАТ КАЖДОГО ТВОЕГО ОТВЕТА (role=assistant):
@@ -53,6 +150,10 @@ PROTOCOL_SPEC = r"""
 Правила:
 - "calls": [] — когда инструменты не нужны; тогда "assistant_markdown" должен содержать полный ответ пользователю.
 - Если нужны инструменты — заполни "calls" одним или несколькими объектами; "arguments" — объект (не строка), по схеме параметров функции из каталога.
+- Запрещено отвечать обычным текстом/markdown вне JSON: любой текст до первого «{» или после последней «}» ломает оркестратор и отключает тулы.
+- Один раунд: не смешивай выдуманные шаги. file_id — только точная строка из `file_id="…"` в сообщении с [CT: RAG-источник …] или из ответа workspace_file_path; никогда не подставляй `[CT:…]`, «источник», многоточие или текст инструкции.
+- Для файлов: предпочтительно один вызов `workspace_file_path`, в следующем раунде `execute_python` с реальным кодом и путём из JSON или с тем же file_id в аргументе `file_id` тула execute_python (тогда в коде есть CT_DATA_FILE_ABSPATH). Не вызывай `workspace_file_path()` внутри Python — это не функция в скрипте.
+- Запросы про таблицу/CSV/файл/аналитику: почти всегда нужен execute_python (часто после workspace_file_path, если в истории есть file_id из [CT:…]). Не заменяй код перечислением строк из контекста.
 - После служебного сообщения пользователя с префиксом [CT_PROTO_JSON] придут результаты тулов — снова ответь ОДНИМ JSON того же вида.
 
 Пример вызова тула:
@@ -74,7 +175,54 @@ def _tool_names_in_catalog(tool_list: list[dict[str, Any]]) -> set[str]:
     return names
 
 
-def _catalog_block(tool_list: list[dict[str, Any]]) -> str:
+def _type_hint_for_schema(spec: dict[str, Any]) -> str:
+    t = spec.get("type")
+    if t == "array":
+        it = spec.get("items")
+        if isinstance(it, dict):
+            return f"array[{_type_hint_for_schema(it)}]"
+        return "array"
+    if t == "object":
+        nested = spec.get("properties")
+        if isinstance(nested, dict) and nested:
+            bits: list[str] = []
+            for j, (kn, vs) in enumerate(nested.items()):
+                if j >= 4:
+                    bits.append("…")
+                    break
+                bits.append(
+                    f"{kn}:{_type_hint_for_schema(vs) if isinstance(vs, dict) else 'any'}",
+                )
+            return "{" + ";".join(bits) + "}"
+        return "object"
+    if isinstance(t, list):
+        return "|".join(str(x) for x in t)
+    if t:
+        return str(t)
+    if "enum" in spec:
+        return "enum"
+    return "any"
+
+
+def _parameters_compact_line(params: dict[str, Any]) -> str:
+    props = params.get("properties")
+    if not isinstance(props, dict):
+        return "()"
+    req_raw = params.get("required")
+    req_set = {str(x) for x in req_raw} if isinstance(req_raw, list) else set()
+    parts: list[str] = []
+    for i, (name, spec) in enumerate(props.items()):
+        if i >= 14:
+            parts.append("…")
+            break
+        if not isinstance(spec, dict):
+            continue
+        opt = "" if name in req_set else "?"
+        parts.append(f"{name}{opt}:{_type_hint_for_schema(spec)}")
+    return ", ".join(parts) if parts else "()"
+
+
+def _catalog_block(tool_list: list[dict[str, Any]], *, compact: bool) -> str:
     lines: list[str] = ["КАТАЛОГ ФУНКЦИЙ (поле name в calls должно совпадать дословно):"]
     for t in tool_list:
         if t.get("type") != "function":
@@ -90,13 +238,30 @@ def _catalog_block(tool_list: list[dict[str, Any]]) -> str:
         lines.append(f"- {name}")
         if desc.strip():
             lines.append(f"  описание: {desc.strip()}")
-        lines.append(f"  parameters (JSON Schema): {json.dumps(params, ensure_ascii=False)}")
+        if compact:
+            lines.append(f"  args: {_parameters_compact_line(params)}")
+        else:
+            lines.append(
+                "  parameters (JSON Schema): "
+                f"{json.dumps(params, ensure_ascii=False, separators=(',', ':'))}",
+            )
     return "\n".join(lines)
 
 
+def compact_tool_catalog_enabled() -> bool:
+    """Меньший системный промпт агента — снижает риск обрыва MWS на больших телах запроса."""
+    v = os.environ.get("CT_AGENT_COMPACT_TOOL_CATALOG", "1").strip().lower()
+    return v not in ("0", "false", "no", "off", "full")
+
+
 def build_protocol_system_message(tool_list: list[dict[str, Any]]) -> str:
-    parts: list[str] = [PROTOCOL_SPEC, _catalog_block(tool_list)]
+    parts: list[str] = [PROTOCOL_SPEC, _catalog_block(tool_list, compact=compact_tool_catalog_enabled())]
     names = _tool_names_in_catalog(tool_list)
+    if "workspace_file_path" in names:
+        parts.append(
+            "Open WebUI / RAG: в тексте могут быть теги <source id=\"…\" name=\"…\"> — id там это номер цитаты, "
+            "не file_id. Для workspace_file_path бери только file_id из строки с префиксом [CT: RAG-источник …]."
+        )
     if any(n.startswith("google_docs_") for n in names):
         from certified_turtles.tools.builtins.google_docs import agent_system_prompt_google_docs_section
 
@@ -104,27 +269,7 @@ def build_protocol_system_message(tool_list: list[dict[str, Any]]) -> str:
     return "\n\n".join(parts)
 
 
-def _extract_json_object_string(raw: str) -> str | None:
-    s = raw.strip()
-    if not s:
-        return None
-    m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", s, re.IGNORECASE)
-    if m:
-        inner = m.group(1).strip()
-        if inner.startswith("{"):
-            return inner
-    lb = s.find("{")
-    rb = s.rfind("}")
-    if lb != -1 and rb != -1 and rb > lb:
-        return s[lb : rb + 1]
-    return None
-
-
-def parse_agent_response(raw: str) -> dict[str, Any] | None:
-    """Разбор ответа ассистента по протоколу; None если не JSON или неверная структура."""
-    blob = _extract_json_object_string(raw)
-    if not blob:
-        return None
+def _parse_protocol_blob(blob: str) -> dict[str, Any] | None:
     try:
         data = json.loads(blob)
     except json.JSONDecodeError:
@@ -159,6 +304,78 @@ def parse_agent_response(raw: str) -> dict[str, Any] | None:
     return {"assistant_markdown": am, "calls": norm_calls}
 
 
+def iter_parsed_protocol_payloads(raw: str) -> list[dict[str, Any]]:
+    """Все валидные объекты протокола в порядке кандидатов (несколько ```json / несколько объектов в тексте)."""
+    out: list[dict[str, Any]] = []
+    for blob in _extract_protocol_json_candidates(raw):
+        parsed = _parse_protocol_blob(blob)
+        if parsed is not None:
+            out.append(parsed)
+    return out
+
+
+def _lenient_protocol_payloads(raw: str) -> list[dict[str, Any]]:
+    """Декодер JSON по позиции `{`: ловит объект протокола после любого преамбульного текста."""
+    s = _strip_model_reasoning_noise(raw)
+    dec = json.JSONDecoder()
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    i = 0
+    n = len(s)
+    while i < n:
+        if s[i] != "{":
+            i += 1
+            continue
+        try:
+            _, end = dec.raw_decode(s[i:])
+        except json.JSONDecodeError:
+            i += 1
+            continue
+        blob = s[i : i + end].strip()
+        if blob in seen:
+            i += end
+            continue
+        seen.add(blob)
+        parsed = _parse_protocol_blob(blob)
+        if parsed is not None:
+            out.append(parsed)
+        i += end
+    return out
+
+
+def iter_parsed_protocol_payloads_any(raw: str) -> list[dict[str, Any]]:
+    primary = iter_parsed_protocol_payloads(raw)
+    if primary:
+        return primary
+    return _lenient_protocol_payloads(raw)
+
+
+def parse_failure_log_preview(raw: str, *, max_chars: int = 900) -> str:
+    """Короткая выдержка сырого ответа для WARNING-логов (docker compose без CT_AGENT_DEBUG)."""
+    if not raw:
+        return "<пусто>"
+    s = raw.strip()
+    if len(s) <= max_chars:
+        return s
+    edge = (max_chars - 36) // 2
+    return f"{s[:edge]}\n… [обрезано {len(s)} симв.] …\n{s[-edge:]}"
+
+
+def parse_agent_response(raw: str) -> dict[str, Any] | None:
+    """Разбор одного ответа ассистента для оркестратора.
+
+    Берём первый объект с непустым `calls` (нужно выполнить тулы). Если таких нет — последний
+    валидный объект (итог раунда). Так модель может ошибочно вставить несколько JSON в одно сообщение.
+    """
+    payloads = iter_parsed_protocol_payloads_any(raw)
+    if not payloads:
+        return None
+    for p in payloads:
+        if p["calls"]:
+            return p
+    return payloads[-1]
+
+
 def tool_outputs_user_message(calls: list[dict[str, Any]], outputs: list[str]) -> str:
     payload = {
         "tool_outputs": [
@@ -170,11 +387,18 @@ def tool_outputs_user_message(calls: list[dict[str, Any]], outputs: list[str]) -
 
 
 def extract_user_visible_assistant_text(content: str) -> str:
-    """Для UI и под-агента: markdown из протокола или исходная строка."""
-    parsed = parse_agent_response(content)
-    if parsed is None:
+    """Для UI и под-агента: markdown из протокола или исходная строка.
+
+    Если в тексте несколько JSON протокола (например два ```json), для показа пользователю берём
+    последний блок без вызовов тулов с непустым markdown — а не первый (часто только tool-call).
+    """
+    payloads = iter_parsed_protocol_payloads_any(content)
+    if not payloads:
         return content
-    return parsed["assistant_markdown"]
+    for p in reversed(payloads):
+        if not p["calls"] and (p["assistant_markdown"] or "").strip():
+            return p["assistant_markdown"]
+    return payloads[-1]["assistant_markdown"]
 
 
 def patch_completion_assistant_markdown(completion: dict[str, Any], markdown: str) -> dict[str, Any]:
@@ -188,6 +412,8 @@ def patch_completion_assistant_markdown(completion: dict[str, Any], markdown: st
             if isinstance(msg, dict):
                 msg = dict(msg)
                 msg["content"] = markdown
+                msg.pop("tool_calls", None)
+                msg.pop("function_call", None)
                 ch0 = dict(ch0)
                 ch0["message"] = msg
                 choices = [ch0] + list(choices[1:])
