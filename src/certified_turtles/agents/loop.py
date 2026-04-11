@@ -5,12 +5,42 @@ import json
 import logging
 from typing import Any
 
+from certified_turtles.agents.json_agent_protocol import (
+    build_protocol_system_message,
+    extract_user_visible_assistant_text,
+    message_text_content,
+    parse_agent_response,
+    patch_completion_assistant_markdown,
+    tool_outputs_user_message,
+)
 from certified_turtles.agents.registry import get_subagent
 from certified_turtles.mws_gpt.client import MWSGPTClient
 from certified_turtles.tools.parent_tools import get_parent_tools, parse_agent_tool_name
 from certified_turtles.tools.registry import openai_tools_for_names, run_primitive_tool
 
 logger = logging.getLogger(__name__)
+
+
+def _tool_names_from_openai_tools(tool_list: list[dict[str, Any]]) -> set[str]:
+    names: set[str] = set()
+    for t in tool_list:
+        if t.get("type") != "function":
+            continue
+        fn = t.get("function")
+        if isinstance(fn, dict) and isinstance(fn.get("name"), str):
+            names.add(fn["name"])
+    return names
+
+
+def _inject_json_protocol_system(
+    messages: list[dict[str, Any]],
+    *,
+    tool_list: list[dict[str, Any]],
+) -> None:
+    """Вставляет системное сообщение с единым JSON-протоколом и каталогом тулов (первым в списке)."""
+    if not tool_list:
+        return
+    messages.insert(0, {"role": "system", "content": build_protocol_system_message(tool_list)})
 
 
 def _first_choice(data: dict[str, Any]) -> dict[str, Any]:
@@ -37,7 +67,7 @@ def _pack_subagent_result(inner: dict[str, Any]) -> str:
         if m.get("role") == "assistant":
             c = m.get("content")
             if c:
-                final_text = str(c)
+                final_text = extract_user_visible_assistant_text(str(c))
                 break
     if not final_text:
         final_text = "(пустой ответ под-агента)"
@@ -127,29 +157,34 @@ def run_agent_chat(
     **chat_kwargs: Any,
 ) -> dict[str, Any]:
     """
-    Цикл оркестратора: chat/completions с тулами из `get_parent_tools()` (примитивы + `agent_{id}`),
-    исполнение tool_calls, повтор до финала или лимита раундов.
+    Цикл оркестратора: при ненулевом списке тулов — единый JSON-протокол в ответах assistant
+    (см. `json_agent_protocol`) и исполнение `calls`; иначе — одиночный chat без протокола.
     """
     work = copy.deepcopy(messages)
     tool_list = get_parent_tools() if tools is None else tools
+    use_json_protocol = bool(tool_list)
+    if use_json_protocol:
+        _inject_json_protocol_system(work, tool_list=tool_list)
+    allowed = _tool_names_from_openai_tools(tool_list) if tool_list else set()
     last_raw: dict[str, Any] | None = None
     rounds = 0
 
     while rounds < max_tool_rounds:
         rounds += 1
-        call_kwargs = dict(chat_kwargs)
-        if tool_list:
-            call_kwargs["tools"] = tool_list
-            if tool_choice is not None:
+        call_kwargs = {k: v for k, v in chat_kwargs.items() if k not in ("tools", "tool_choice")}
+        if not use_json_protocol:
+            if tools is not None and tool_choice is not None:
                 call_kwargs["tool_choice"] = tool_choice
-        logger.debug("agent chat round %s messages=%s depth=%s", rounds, len(work), delegate_depth)
+            if tools is not None:
+                call_kwargs["tools"] = tools
+        logger.debug("agent chat round %s messages=%s depth=%s json_proto=%s", rounds, len(work), delegate_depth, use_json_protocol)
         last_raw = client.chat_completions(model, work, **call_kwargs)
         choice = _first_choice(last_raw)
         msg = _choice_message(choice)
-        work.append(copy.deepcopy(msg))
+        raw_text = message_text_content(msg)
 
-        tcalls = msg.get("tool_calls") or []
-        if not tcalls:
+        if not use_json_protocol:
+            work.append(copy.deepcopy(msg))
             return {
                 "messages": work,
                 "completion": last_raw,
@@ -157,27 +192,40 @@ def run_agent_chat(
                 "truncated": False,
             }
 
-        for tc in tcalls:
-            if not isinstance(tc, dict):
+        parsed = parse_agent_response(raw_text)
+        if parsed is None:
+            logger.warning("agent JSON protocol: parse failed at round %s", rounds)
+            work.append({"role": "assistant", "content": raw_text})
+            patched = patch_completion_assistant_markdown(last_raw, raw_text)
+            return {
+                "messages": work,
+                "completion": patched,
+                "tool_rounds_used": rounds,
+                "truncated": False,
+            }
+
+        work.append({"role": "assistant", "content": raw_text})
+        calls = parsed["calls"]
+        if not calls:
+            md = parsed["assistant_markdown"]
+            patched = patch_completion_assistant_markdown(last_raw, md)
+            return {
+                "messages": work,
+                "completion": patched,
+                "tool_rounds_used": rounds,
+                "truncated": False,
+            }
+
+        outputs: list[str] = []
+        for c in calls:
+            name = c["name"]
+            args = c["arguments"]
+            if name not in allowed:
+                outputs.append(
+                    json.dumps({"error": "unknown_tool", "name": name}, ensure_ascii=False),
+                )
                 continue
-            fn = tc.get("function")
-            if not isinstance(fn, dict):
-                continue
-            name = str(fn.get("name") or "")
-            raw_args = fn.get("arguments")
-            if isinstance(raw_args, str):
-                try:
-                    args: Any = json.loads(raw_args or "{}")
-                except json.JSONDecodeError:
-                    args = {"_raw_arguments": (raw_args or "")[:2000]}
-            elif isinstance(raw_args, dict):
-                args = raw_args
-            else:
-                args = {}
-            if not isinstance(args, dict):
-                args = {}
-            tid = str(tc.get("id") or "")
-            content = _execute_tool_call(
+            out = _execute_tool_call(
                 name,
                 args,
                 client=client,
@@ -186,11 +234,21 @@ def run_agent_chat(
                 max_delegate_depth=max_delegate_depth,
                 **chat_kwargs,
             )
-            work.append({"role": "tool", "tool_call_id": tid, "content": content})
+            outputs.append(out)
+        work.append({"role": "user", "content": tool_outputs_user_message(calls, outputs)})
 
+    visible = ""
+    if last_raw is not None:
+        try:
+            lm = _choice_message(_first_choice(last_raw))
+            visible = extract_user_visible_assistant_text(message_text_content(lm))
+        except ValueError:
+            visible = ""
+    tail = "\n\n[лимит раундов агента: ответ может быть неполным.]" if not visible.strip() else ""
+    patched = patch_completion_assistant_markdown(last_raw or {}, (visible or "") + tail)
     return {
         "messages": work,
-        "completion": last_raw,
+        "completion": patched,
         "tool_rounds_used": rounds,
         "truncated": True,
     }
