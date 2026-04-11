@@ -102,3 +102,15 @@ def note_file_write(
         line_ending=line_ending,
         is_partial_view=False,
     )
+
+
+def clone_file_state_namespace(source_session_id: str, target_session_id: str) -> None:
+    with _LOCK:
+        source = _SESSION_CACHE.get(source_session_id)
+        if source is None:
+            _SESSION_CACHE.pop(target_session_id, None)
+            _SESSION_SIZES.pop(target_session_id, None)
+            return
+        cloned = OrderedDict((key, state) for key, state in source.items())
+        _SESSION_CACHE[target_session_id] = cloned
+        _SESSION_SIZES[target_session_id] = _SESSION_SIZES.get(source_session_id, 0)

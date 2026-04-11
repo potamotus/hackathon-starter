@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import time
 from typing import Any
 
 from certified_turtles.memory_runtime.file_state import get_file_state, note_file_read, note_file_write
@@ -47,7 +48,9 @@ def _resolve_allowed_path(raw: Any) -> Path:
 
 def _current_session_id() -> str:
     ctx = current_request_context()
-    return ctx.session_id if ctx is not None else "global"
+    if ctx is None:
+        return "global"
+    return ctx.file_state_namespace or ctx.session_id
 
 
 def _read_text(path: Path) -> str:
@@ -194,12 +197,29 @@ def _handle_file_edit(arguments: dict[str, Any]) -> str:
     )
 
 
+def _compile_safe_regex(pattern: str) -> re.Pattern:
+    if len(pattern) > 500:
+        raise ValueError("Pattern too long")
+    try:
+        return re.compile(pattern, re.IGNORECASE)
+    except re.error as e:
+        raise ValueError(f"Invalid regex: {e}") from e
+
+
 def _handle_glob_search(arguments: dict[str, Any]) -> str:
     pattern = arguments.get("pattern")
     root = _resolve_allowed_path(arguments.get("path") or str(claude_like_root()))
     if not isinstance(pattern, str) or not pattern.strip():
         return json.dumps({"error": "invalid_pattern"}, ensure_ascii=False)
-    files = [str(p) for p in root.glob(pattern) if p.is_file()]
+    root_resolved = root.resolve(strict=False)
+    files = []
+    for p in root.glob(pattern):
+        if p.is_file():
+            try:
+                p.resolve(strict=False).relative_to(root_resolved)
+                files.append(str(p))
+            except ValueError:
+                continue
     files.sort()
     return json.dumps({"filenames": files[:100], "num_files": len(files), "truncated": len(files) > 100}, ensure_ascii=False)
 
@@ -209,12 +229,23 @@ def _handle_grep_search(arguments: dict[str, Any]) -> str:
     root = _resolve_allowed_path(arguments.get("path") or str(claude_like_root()))
     if not isinstance(pattern, str) or not pattern.strip():
         return json.dumps({"error": "invalid_pattern"}, ensure_ascii=False)
-    expr = re.compile(pattern, re.IGNORECASE)
+    try:
+        expr = _compile_safe_regex(pattern)
+    except ValueError as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
     lines: list[str] = []
     matches = 0
+    deadline = time.monotonic() + 10
+    root_resolved = root.resolve(strict=False)
     for path in root.rglob("*"):
+        if time.monotonic() > deadline:
+            break
         if not path.is_file():
             continue
+        try:
+            path.resolve(strict=False).relative_to(root_resolved)
+        except ValueError:
+            continue  # symlink pointing outside root
         try:
             text = _read_text(path)
         except OSError:

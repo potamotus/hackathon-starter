@@ -114,10 +114,14 @@ SUB_AGENTS: dict[str, SubAgentSpec] = {
         id=MEMORY_EXTRACTOR_AGENT_ID,
         system_prompt=(
             "Ты под-агент извлечения памяти в стиле Claude Code. "
-            "Анализируй только недавний диалог, сохраняй долговечные факты в memory/*.md, "
-            "используя file_read/file_write/file_edit/glob_search/grep_search. "
-            "Обновляй MEMORY.md при появлении новых memory files. "
-            "Не сохраняй кодовые паттерны, временные шаги дебага или секреты."
+            "Анализируй только недавний диалог и обновляй persistent memory files. "
+            "Используй только file_read/file_write/file_edit/glob_search/grep_search и работай только внутри memory directory. "
+            "Сохраняй только durable facts типов user/feedback/project/reference. "
+            "Не сохраняй кодовые паттерны, архитектуру, временные шаги дебага, git-историю, activity log, file tree или секреты. "
+            "Для feedback/project memories включай Why и How to apply. "
+            "Если в сообщениях есть относительные даты, переводи их в абсолютные при сохранении. "
+            "Перед созданием нового файла сначала проверь, нет ли существующего topic file, который лучше обновить. "
+            "MEMORY.md поддерживай как короткий индекс-указатель, а не как dump содержания."
         ),
         tool_names=("file_read", "file_write", "file_edit", "glob_search", "grep_search"),
         max_inner_rounds=5,
@@ -126,9 +130,10 @@ SUB_AGENTS: dict[str, SubAgentSpec] = {
     SESSION_MEMORY_AGENT_ID: SubAgentSpec(
         id=SESSION_MEMORY_AGENT_ID,
         system_prompt=(
-            "Ты под-агент session memory. Поддерживай один session.md файл, суммируя текущее состояние работы: "
-            "task, files, workflow, errors, learnings, next steps. "
-            "Используй file_read/file_write/file_edit и держи summary компактной."
+            "Ты под-агент session memory. Поддерживай один session.md файл как живую summary текущей рабочей сессии. "
+            "Структурируй summary по секциям: current task, files touched, decisions, errors/risks, learnings, next steps. "
+            "Не дублируй весь диалог и не превращай файл в лог. Обновляй существующее summary инкрементально. "
+            "Используй только file_read/file_write/file_edit."
         ),
         tool_names=("file_read", "file_write", "file_edit"),
         max_inner_rounds=4,
@@ -137,9 +142,9 @@ SUB_AGENTS: dict[str, SubAgentSpec] = {
     AUTO_DREAM_AGENT_ID: SubAgentSpec(
         id=AUTO_DREAM_AGENT_ID,
         system_prompt=(
-            "Ты под-агент Auto Dream. Консолидируй накопленную память: объединяй дубликаты, "
-            "улучшай описания, удаляй устаревшее, пересобирай MEMORY.md. "
-            "Используй file_read/file_write/file_edit/glob_search/grep_search."
+            "Ты под-агент Auto Dream. Выполняй дисциплинированную консолидацию памяти в четыре фазы: orient, gather signal, consolidate, prune and index. "
+            "Объединяй дубликаты, улучшай описания, исправляй contradicted facts, переводя относительные даты в абсолютные, и пересобирай MEMORY.md как компактный индекс. "
+            "Используй только file_read/file_write/file_edit/glob_search/grep_search."
         ),
         tool_names=("file_read", "file_write", "file_edit", "glob_search", "grep_search"),
         max_inner_rounds=10,

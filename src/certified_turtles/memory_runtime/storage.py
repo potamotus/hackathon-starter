@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
+import tempfile
 import time
 import uuid
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 
 MAX_MEMORY_FILES = 200
@@ -20,6 +25,12 @@ VALID_MEMORY_TYPES = {"user", "feedback", "project", "reference"}
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 SAFE_SEGMENT_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 FRONTMATTER_SCAN_LINES = 30
+_LEGACY_KEY_MAX = 80
+
+
+def _utc_now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 @dataclass(frozen=True)
@@ -40,15 +51,26 @@ def claude_like_root() -> Path:
 
 def slugify(value: str) -> str:
     cleaned = SAFE_SEGMENT_RE.sub("-", value.strip()).strip("-").lower()
-    return cleaned[:80] or "default"
+    return cleaned[:_LEGACY_KEY_MAX] or "default"
+
+
+def stable_bucket_name(value: str, *, prefix: str) -> str:
+    raw = value or f"default-{prefix}"
+    slug = slugify(raw)
+    digest = hashlib.sha1(raw.encode("utf-8", errors="replace")).hexdigest()[:12]
+    return f"{prefix}-{slug}-{digest}"
+
+
+def _legacy_bucket_name(value: str, *, fallback: str) -> str:
+    return slugify(value or fallback)
 
 
 def scope_slug(scope_id: str) -> str:
-    return slugify(scope_id or "default-scope")
+    return stable_bucket_name(scope_id or "default-scope", prefix="scope")
 
 
 def session_slug(session_id: str) -> str:
-    return slugify(session_id or "default-session")
+    return stable_bucket_name(session_id or "default-session", prefix="session")
 
 
 def projects_root() -> Path:
@@ -63,14 +85,51 @@ def sessions_root() -> Path:
     return path
 
 
+def _atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", dir=path.parent, delete=False, encoding=encoding) as tmp:
+        tmp.write(content)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp_path = Path(tmp.name)
+    tmp_path.replace(path)
+
+
+def _ensure_bucket(root: Path, current_name: str, legacy_name: str) -> Path:
+    current = root / current_name
+    legacy = root / legacy_name
+    if current.exists():
+        current.mkdir(parents=True, exist_ok=True)
+        return current
+    if legacy.exists() and not current.exists():
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            legacy.replace(current)
+        except OSError:
+            # Best-effort compatibility for dirty local state: keep using the legacy bucket.
+            legacy.mkdir(parents=True, exist_ok=True)
+            return legacy
+    current.mkdir(parents=True, exist_ok=True)
+    return current
+
+
 def memory_dir(scope_id: str) -> Path:
-    path = projects_root() / scope_slug(scope_id) / "memory"
+    bucket = _ensure_bucket(
+        projects_root(),
+        scope_slug(scope_id),
+        _legacy_bucket_name(scope_id, fallback="default-scope"),
+    )
+    path = bucket / "memory"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 def session_dir(session_id: str) -> Path:
-    path = sessions_root() / session_slug(session_id)
+    path = _ensure_bucket(
+        sessions_root(),
+        session_slug(session_id),
+        _legacy_bucket_name(session_id, fallback="default-session"),
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -89,6 +148,10 @@ def session_meta_path(session_id: str) -> Path:
 
 def scope_meta_path(scope_id: str) -> Path:
     return memory_dir(scope_id) / ".meta.json"
+
+
+def scope_lock_path(scope_id: str) -> Path:
+    return memory_dir(scope_id) / ".auto-dream.lock"
 
 
 def ensure_session_meta(session_id: str, *, scope_id: str) -> None:
@@ -111,8 +174,47 @@ def read_json(path: Path) -> dict[str, Any] | None:
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_text(path, json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _frontmatter_scalar(value: str) -> str:
+    # YAML quoted scalars via JSON string encoding are sufficient for this frontmatter subset.
+    return json.dumps(str(value), ensure_ascii=False)
+
+
+def _validate_memory_filename(raw: str | None, *, fallback_name: str) -> Path:
+    if not raw or not raw.strip():
+        return Path(f"{slugify(fallback_name)}.md")
+    candidate = Path(raw.strip())
+    if candidate.is_absolute():
+        raise ValueError("memory filename must be relative to the memory directory")
+    parts: list[str] = []
+    for part in candidate.parts:
+        if part in ("", "."):
+            continue
+        if part == "..":
+            raise ValueError("memory filename cannot traverse outside the memory directory")
+        sanitized = SAFE_SEGMENT_RE.sub("-", part).strip("-")
+        if not sanitized:
+            raise ValueError("memory filename contains an empty path segment after sanitization")
+        parts.append(sanitized)
+    if not parts:
+        parts = [f"{slugify(fallback_name)}.md"]
+    if not parts[-1].endswith(".md"):
+        parts[-1] = f"{parts[-1]}.md"
+    return Path(*parts)
+
+
+def resolve_memory_path(scope_id: str, filename: str | None, *, fallback_name: str) -> Path:
+    root = memory_dir(scope_id)
+    rel = _validate_memory_filename(filename, fallback_name=fallback_name)
+    path = (root / rel).resolve(strict=False)
+    root_resolved = root.resolve(strict=False)
+    try:
+        path.relative_to(root_resolved)
+    except ValueError as exc:
+        raise ValueError("memory path escaped the memory directory") from exc
+    return path
 
 
 def parse_frontmatter(text: str) -> dict[str, str]:
@@ -124,7 +226,14 @@ def parse_frontmatter(text: str) -> dict[str, str]:
         if ":" not in line:
             continue
         key, _, value = line.partition(":")
-        out[key.strip()] = value.strip().strip('"')
+        raw = value.strip()
+        if raw.startswith('"') and raw.endswith('"'):
+            try:
+                out[key.strip()] = json.loads(raw)
+                continue
+            except json.JSONDecodeError:
+                pass
+        out[key.strip()] = raw.strip('"')
     return out
 
 
@@ -199,35 +308,41 @@ def write_memory_file(
     filename: str | None = None,
     source: str = "manual",
 ) -> Path:
-    kind = type_ if type_ in VALID_MEMORY_TYPES else "project"
-    root = memory_dir(scope_id)
-    slug = slugify(filename or name)
-    nested = Path(filename) if filename else Path(f"{slug}.md")
-    path = root / nested
+    kind = type_
+    if kind not in VALID_MEMORY_TYPES:
+        _log.warning("invalid memory type %r, falling back to 'project'", kind)
+        kind = "project"
+    body_text = body.strip()
+    body_bytes = len(body_text.encode("utf-8"))
+    if body_bytes > MAX_MEMORY_FILE_BYTES:
+        raise ValueError(
+            f"memory body is too large ({body_bytes} bytes > {MAX_MEMORY_FILE_BYTES} byte limit)"
+        )
+    path = resolve_memory_path(scope_id, filename, fallback_name=name)
     path.parent.mkdir(parents=True, exist_ok=True)
-    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    now = _utc_now_iso()
     created = now
     if path.exists():
         existing = read_frontmatter(path)
         created = existing.get("created", now)
     payload = (
         "---\n"
-        f"name: {name}\n"
-        f"description: {description}\n"
-        f"type: {kind}\n"
-        f"created: {created}\n"
-        f"updated: {now}\n"
-        f"source: {source}\n"
+        f"name: {_frontmatter_scalar(name)}\n"
+        f"description: {_frontmatter_scalar(description)}\n"
+        f"type: {_frontmatter_scalar(kind)}\n"
+        f"created: {_frontmatter_scalar(created)}\n"
+        f"updated: {_frontmatter_scalar(now)}\n"
+        f"source: {_frontmatter_scalar(source)}\n"
         "---\n\n"
-        f"{body.strip()}\n"
+        f"{body_text}\n"
     )
-    path.write_text(payload, encoding="utf-8")
+    _atomic_write_text(path, payload, encoding="utf-8")
     rebuild_memory_index(scope_id)
     return path
 
 
 def delete_memory_file(scope_id: str, filename: str) -> bool:
-    path = memory_dir(scope_id) / Path(filename)
+    path = resolve_memory_path(scope_id, filename, fallback_name="memory")
     if not path.is_file():
         return False
     path.unlink()
@@ -235,7 +350,14 @@ def delete_memory_file(scope_id: str, filename: str) -> bool:
     return True
 
 
-def rebuild_memory_index(scope_id: str) -> Path:
+_last_rebuild: dict[str, float] = {}
+
+
+def rebuild_memory_index(scope_id: str, *, force: bool = False) -> Path:
+    now = time.time()
+    if not force and (now - _last_rebuild.get(scope_id, 0)) < 1.0:
+        return memory_index_path(scope_id)
+    _last_rebuild[scope_id] = now
     headers = scan_memory_headers(scope_id)
     lines = ["# Memory Index"]
     for item in headers[: max(0, MAX_MEMORY_INDEX_LINES - 1)]:
@@ -246,25 +368,56 @@ def rebuild_memory_index(scope_id: str) -> Path:
         truncated = encoded[:MAX_MEMORY_INDEX_BYTES].decode("utf-8", errors="ignore")
         text = truncated.rstrip() + "\n"
     path = memory_index_path(scope_id)
-    path.write_text(text, encoding="utf-8")
+    _atomic_write_text(path, text, encoding="utf-8")
     return path
 
 
 def append_transcript_event(session_id: str, payload: dict[str, Any]) -> None:
     path = session_transcript_path(session_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
     record = {"uuid": uuid.uuid4().hex, **payload}
     with path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
 
 
 def read_transcript_events(session_id: str, *, limit: int = 80) -> list[dict[str, Any]]:
     path = session_transcript_path(session_id)
     if not path.is_file():
         return []
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    # Tail-read: read from end of file to avoid OOM on large transcripts.
+    # We accumulate a carry-over fragment so lines spanning chunk boundaries
+    # are reassembled correctly.
+    chunk_size = 8192
+    lines: list[str] = []
+    carry = ""
+    with path.open("rb") as fh:
+        fh.seek(0, 2)  # seek to end
+        remaining = fh.tell()
+        while remaining > 0 and len(lines) < limit + 1:
+            read_size = min(chunk_size, remaining)
+            remaining -= read_size
+            fh.seek(remaining)
+            chunk = fh.read(read_size).decode("utf-8", errors="replace")
+            parts = chunk.split("\n")
+            # Last element of parts joins with the carry from the previous
+            # (rightward) chunk to form a complete line.
+            parts[-1] = parts[-1] + carry
+            carry = parts[0]  # first element may be a partial line
+            lines = parts[1:] + lines
+        # After all chunks, carry holds the remainder from the very start of
+        # the file — prepend it as the first line.
+        if carry:
+            lines = [carry] + lines
+    # Filter empty strings (from trailing newlines) before slicing so they
+    # don't consume limit slots.
+    lines = [ln for ln in lines if ln]
     rows = lines[-limit:]
     out: list[dict[str, Any]] = []
     for row in rows:
+        if not row:
+            continue
         try:
             data = json.loads(row)
         except json.JSONDecodeError:
@@ -276,7 +429,7 @@ def read_transcript_events(session_id: str, *, limit: int = 80) -> list[dict[str
 
 def write_session_memory(session_id: str, content: str) -> Path:
     path = session_memory_path(session_id)
-    path.write_text(content.strip() + "\n", encoding="utf-8")
+    _atomic_write_text(path, content.strip() + "\n", encoding="utf-8")
     return path
 
 
@@ -289,11 +442,62 @@ def read_session_memory(session_id: str) -> str:
 
 def list_scope_sessions(scope_id: str) -> list[Path]:
     out: list[Path] = []
-    for path in sessions_root().iterdir():
+    root = sessions_root()
+    if not root.is_dir():
+        return out
+    entries = sorted(root.iterdir(), key=lambda p: p.stat().st_mtime if p.is_dir() else 0, reverse=True)
+    for path in entries[:500]:  # cap scan at 500
         if not path.is_dir():
             continue
         meta = read_json(path / "meta.json") or {}
         if meta.get("scope_id") == scope_id:
             out.append(path)
-    out.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return out
+
+
+def read_last_consolidated_at(scope_id: str) -> float:
+    path = scope_lock_path(scope_id)
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def try_acquire_scope_lock(scope_id: str, *, stale_after_seconds: int = 3600) -> float | None:
+    path = scope_lock_path(scope_id)
+    now = time.time()
+    holder_pid: int | None = None
+    existing_mtime = 0.0
+    try:
+        stat = path.stat()
+        existing_mtime = stat.st_mtime
+        raw = path.read_text(encoding="utf-8", errors="replace").strip()
+        holder_pid = int(raw) if raw.isdigit() else None
+    except OSError:
+        pass
+    if existing_mtime and (now - existing_mtime) < stale_after_seconds and holder_pid is not None:
+        try:
+            os.kill(holder_pid, 0)
+            return None
+        except OSError:
+            pass
+    _atomic_write_text(path, str(os.getpid()), encoding="utf-8")
+    try:
+        verify = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError:
+        return None
+    if verify != str(os.getpid()):
+        return None
+    return existing_mtime
+
+
+def rollback_scope_lock(scope_id: str, previous_mtime: float) -> None:
+    path = scope_lock_path(scope_id)
+    try:
+        if previous_mtime <= 0:
+            path.unlink(missing_ok=True)
+            return
+        _atomic_write_text(path, "", encoding="utf-8")
+        os.utime(path, (previous_mtime, previous_mtime))
+    except OSError:
+        pass

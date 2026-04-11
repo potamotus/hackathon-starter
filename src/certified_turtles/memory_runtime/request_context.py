@@ -9,6 +9,7 @@ import threading
 class RequestContext:
     session_id: str
     scope_id: str
+    file_state_namespace: str | None = None
 
 
 _LOCAL = threading.local()

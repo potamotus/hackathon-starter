@@ -10,17 +10,20 @@ from certified_turtles.agent_debug_log import agent_logger, debug_clip
 from certified_turtles.agents.loop import run_agent_chat
 from certified_turtles.agents.registry import get_subagent
 from certified_turtles.mws_gpt.client import MWSGPTClient
+from certified_turtles.memory_runtime.file_state import clone_file_state_namespace
+from certified_turtles.memory_runtime.request_context import RequestContext
 from certified_turtles.tools.registry import openai_tools_for_names
 
 
 _log = agent_logger("fork")
 
 
-@dataclass
+@dataclass(frozen=True)
 class CacheSafeSnapshot:
     model: str
     scope_id: str
     session_id: str
+    file_state_namespace: str
     messages: list[dict[str, Any]]
     saved_at: float
 
@@ -52,6 +55,8 @@ class ForkRuntime:
         if snap is None or spec is None:
             return None
         tool_list = openai_tools_for_names(spec.tool_names)
+        child_namespace = f"{snap.file_state_namespace}::agent::{agent_id}"
+        clone_file_state_namespace(snap.file_state_namespace, child_namespace)
         work = [
             *snap.messages,
             {"role": "system", "content": spec.system_prompt},
@@ -70,6 +75,11 @@ class ForkRuntime:
             work,
             tools=tool_list,
             max_tool_rounds=max_tool_rounds or spec.max_inner_rounds,
+            request_context=RequestContext(
+                session_id=snap.session_id,
+                scope_id=snap.scope_id,
+                file_state_namespace=child_namespace,
+            ),
         )
         _log.debug(
             "fork end session=%s agent=%s truncated=%s completion=\n%s",

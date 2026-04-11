@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Iterator
 
 from certified_turtles.agent_debug_log import agent_logger, summarize_messages
 from certified_turtles.agents.loop import run_agent_chat
@@ -80,6 +80,19 @@ class LLMService:
         _llm_log.debug("chat_plain after normalize\n%s", summarize_messages(messages))
         call_kwargs = {k: v for k, v in extra.items() if k not in ("tools", "tool_choice", "request_context")}
         return self._client.chat_completions(model, messages, **call_kwargs)
+
+    def chat_plain_stream(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        *,
+        request_context: RequestContext | None = None,
+        **extra: Any,
+    ) -> Iterator[bytes]:
+        """Plain chat with true SSE streaming from upstream."""
+        messages = normalize_chat_messages(messages)
+        call_kwargs = {k: v for k, v in extra.items() if k not in ("tools", "tool_choice", "request_context")}
+        return self._client.chat_completions_stream(model, messages, **call_kwargs)
 
     def run_agent(
         self,

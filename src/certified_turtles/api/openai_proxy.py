@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import time
 import uuid
 from typing import Any
@@ -91,7 +92,7 @@ def _sse_stream(model: str, completion: dict[str, Any]):
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
     content = _final_assistant_content(completion)
-    chunk = {
+    role_chunk = {
         "id": cid,
         "object": "chat.completion.chunk",
         "created": created,
@@ -99,13 +100,93 @@ def _sse_stream(model: str, completion: dict[str, Any]):
         "choices": [
             {
                 "index": 0,
-                "delta": {"role": "assistant", "content": content},
+                "delta": {"role": "assistant"},
+                "finish_reason": None,
+            }
+        ],
+    }
+    yield f"data: {json.dumps(role_chunk, ensure_ascii=False)}\n\n"
+    step = 320
+    for start in range(0, len(content), step):
+        piece = content[start : start + step]
+        chunk = {
+            "id": cid,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {"content": piece},
+                    "finish_reason": None,
+                }
+            ],
+        }
+        yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+    final_chunk = {
+        "id": cid,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [
+            {
+                "index": 0,
+                "delta": {},
                 "finish_reason": "stop",
             }
         ],
     }
-    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+    yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n"
     yield "data: [DONE]\n\n"
+
+
+async def _upstream_sse_stream(svc, model, messages, runtime, session_id, scope_id, prepared_messages, extra):
+    """True upstream SSE for plain mode: pipe chunks, collect content for after_response."""
+    import queue as _queue
+
+    q: _queue.Queue[bytes | Exception | None] = _queue.Queue()
+    accumulated: list[str] = []
+
+    def _producer():
+        try:
+            call_kwargs = {k: v for k, v in extra.items() if k not in ("tools", "tool_choice", "request_context")}
+            for raw_line in svc.chat_plain_stream(model, messages, **call_kwargs):
+                q.put(raw_line)
+        except Exception as exc:
+            q.put(exc)
+        finally:
+            q.put(None)
+
+    thread = threading.Thread(target=_producer, daemon=True)
+    thread.start()
+
+    while True:
+        item = await asyncio.to_thread(q.get)
+        if item is None:
+            break
+        if isinstance(item, Exception):
+            raise item
+        text = item.decode("utf-8", errors="replace").strip()
+        if text.startswith("data: ") and text[6:] != "[DONE]":
+            try:
+                chunk = json.loads(text[6:])
+                delta = (chunk.get("choices") or [{}])[0].get("delta", {})
+                c = delta.get("content")
+                if c:
+                    accumulated.append(c)
+            except json.JSONDecodeError:
+                pass
+        yield item if item.endswith(b"\n") else item + b"\n"
+
+    full_content = "".join(accumulated)
+    final_messages = [*prepared_messages, {"role": "assistant", "content": full_content}]
+    try:
+        runtime.after_response(
+            svc.client, model=model, prepared_messages=prepared_messages,
+            final_messages=final_messages, session_id=session_id, scope_id=scope_id,
+        )
+    except Exception:
+        pass
 
 
 def _wants_plain_chat(body: dict[str, Any]) -> bool:
@@ -137,6 +218,17 @@ def _request_ids(body: dict[str, Any]) -> tuple[str, str]:
         or session_id
     )
     return str(session_id), str(scope_id)
+
+
+def _request_contract_mode(body: dict[str, Any]) -> str | None:
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+    value = body.get("ct_request_mode") or metadata.get("ct_request_mode") or body.get("ct_request_kind") or metadata.get("ct_request_kind")
+    if not isinstance(value, str):
+        return None
+    mode = value.strip().lower()
+    if mode in {"plain", "chat", "agent", "router", "meta_task"}:
+        return mode
+    return None
 
 
 def _openwebui_meta_task_forces_plain(messages: Any) -> bool:
@@ -200,9 +292,19 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
 
     svc = _service()
     runtime = runtime_from_env()
+    contract_mode = _request_contract_mode(body)
     ow_meta_plain = _openwebui_meta_task_forces_plain(messages)
     ow_tool_router_plain = _openwebui_tool_router_forces_plain(messages)
-    plain = force_plain or _wants_plain_chat(body) or ow_meta_plain or ow_tool_router_plain
+    if contract_mode == "agent":
+        plain = bool(force_plain)
+    else:
+        plain = (
+            force_plain
+            or contract_mode in {"plain", "chat", "router", "meta_task"}
+            or _wants_plain_chat(body)
+            or ow_meta_plain
+            or ow_tool_router_plain
+        )
     session_id, scope_id = _request_ids(body)
     prepared_messages = runtime.prepare_messages(
         None if plain else svc.client,
@@ -211,10 +313,12 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
         session_id=session_id,
         scope_id=scope_id,
     )
-    req_ctx = RequestContext(session_id=session_id, scope_id=scope_id)
-    if ow_meta_plain and not force_plain and not _wants_plain_chat(body):
+    req_ctx = RequestContext(session_id=session_id, scope_id=scope_id, file_state_namespace=session_id)
+    if contract_mode in {"router", "meta_task"}:
+        _proxy_log.debug("explicit request contract mode=%s -> plain chat", contract_mode)
+    if ow_meta_plain and contract_mode is None and not force_plain and not _wants_plain_chat(body):
         _proxy_log.debug("openwebui auxiliary ### Task -> plain chat (no agent JSON protocol)")
-    if ow_tool_router_plain and not force_plain and not _wants_plain_chat(body):
+    if ow_tool_router_plain and contract_mode is None and not force_plain and not _wants_plain_chat(body):
         _proxy_log.debug("openwebui Available Tools router -> plain chat (no agent JSON protocol)")
     _proxy_log.debug(
         "chat_completions request model=%s plain=%s stream=%s max_tool_rounds=%s extra_keys=%s\nmessages_in=\n%s",
@@ -225,6 +329,12 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
         sorted(extra.keys()),
         summarize_messages(prepared_messages, preview=400) if isinstance(prepared_messages, list) else str(type(prepared_messages)),
     )
+    # Plain + stream: true upstream SSE (pipe chunks directly from MWS).
+    if plain and stream:
+        return StreamingResponse(
+            _upstream_sse_stream(svc, model, prepared_messages, runtime, session_id, scope_id, prepared_messages, extra),
+            media_type="text/event-stream",
+        )
     try:
         if plain:
             completion = await asyncio.to_thread(
