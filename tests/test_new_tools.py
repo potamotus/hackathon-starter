@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from certified_turtles.agents.registry import DEEP_RESEARCH_AGENT_ID, get_subagent
+from certified_turtles.agents.registry import CODER_AGENT_ID, DEEP_RESEARCH_AGENT_ID, get_subagent
 from certified_turtles.tools.parent_tools import get_parent_tools
 from certified_turtles.tools.registry import list_primitive_tool_names, run_primitive_tool
 
@@ -15,6 +15,7 @@ def test_new_primitives_registered():
     assert "generate_presentation" in names
     assert "read_workspace_file" in names
     assert "execute_python" in names
+    assert "mws_list_models" in names
     assert "google_docs_read" in names
     assert "google_docs_append" in names
 
@@ -28,11 +29,13 @@ def test_parent_tools_expose_all():
         "generate_presentation",
         "read_workspace_file",
         "execute_python",
+        "mws_list_models",
         "google_docs_read",
         "google_docs_append",
     ):
         assert expected in tool_names
     assert f"agent_{DEEP_RESEARCH_AGENT_ID}" in tool_names
+    assert f"agent_{CODER_AGENT_ID}" in tool_names
 
 
 def test_deep_research_subagent_has_research_tools():
@@ -40,6 +43,13 @@ def test_deep_research_subagent_has_research_tools():
     assert spec is not None
     assert "web_search" in spec.tool_names
     assert "fetch_url" in spec.tool_names
+
+
+def test_coder_subagent_has_python_tools():
+    spec = get_subagent(CODER_AGENT_ID)
+    assert spec is not None
+    assert "execute_python" in spec.tool_names
+    assert "read_workspace_file" in spec.tool_names
 
 
 def test_generate_image_returns_pollinations_url():
@@ -119,3 +129,21 @@ def test_web_search_refuses_url_query():
     out = run_primitive_tool("web_search", {"query": "https://example.com"})
     data = json.loads(out)
     assert data.get("error") == "bad_query"
+
+
+def test_mws_list_models_primitive(monkeypatch):
+    class StubClient:
+        def __init__(self, api_key=None, *, base_url=None):
+            pass
+
+        def list_models(self):
+            return {"object": "list", "data": [{"id": "mws-gpt-alpha", "owned_by": "mws"}]}
+
+    monkeypatch.setattr(
+        "certified_turtles.tools.builtins.mws_list_models.MWSGPTClient",
+        StubClient,
+    )
+    out = run_primitive_tool("mws_list_models", {})
+    data = json.loads(out)
+    assert data["data"][0]["id"] == "mws-gpt-alpha"
+    assert data["count"] == 1

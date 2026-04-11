@@ -12,6 +12,75 @@ from certified_turtles.tools.registry import openai_tools_for_names, run_primiti
 
 logger = logging.getLogger(__name__)
 
+_TOOL_POLICY = (
+    "[Инструменты] Если нужны факты из сети, содержимое страницы по URL, список моделей MWS или выполнение кода на сервере — "
+    "используй **вызов функции** в ответе API (`tool_calls`). Markdown-блок ```python ... ``` сам по себе **не исполняется** на сервере; "
+    "для реального вывода нужен соответствующий тул."
+)
+
+_MWS_MODELS_HINT = (
+    "[Модели MWS] Актуальный список id моделей для ключа сервера — только через инструмент `mws_list_models`, "
+    "а не через сетевые импорты внутри `execute_python`."
+)
+
+_EXECUTE_PYTHON_GUIDANCE = (
+    "[Исполнение кода] В каталоге тулов есть `execute_python`: передай полный скрипт в аргументе `code` — "
+    "он выполнится на сервере (numpy, matplotlib, pandas и др. из белого списка), в ответе будет stdout/stderr и ссылки на файлы. "
+    "Для расчётов, проверки логики, симуляций и графиков **вызывай этот инструмент**, а не ограничивайся только markdown-блоком с кодом, "
+    "если нужен реальный вывод. Графики сохраняй, например: "
+    "`plt.savefig(os.path.join(CT_RUN_OUTPUT_DIR, \"plot.png\"))`."
+)
+
+
+def _tool_names_from_openai_tools(tool_list: list[dict[str, Any]]) -> set[str]:
+    names: set[str] = set()
+    for t in tool_list:
+        if t.get("type") != "function":
+            continue
+        fn = t.get("function")
+        if isinstance(fn, dict) and isinstance(fn.get("name"), str):
+            names.add(fn["name"])
+    return names
+
+
+def _inject_tool_guidance(
+    messages: list[dict[str, Any]],
+    *,
+    tool_list: list[dict[str, Any]],
+) -> None:
+    """Системные подсказки: общая политика tool_calls + узкие хинты по доступным тулам."""
+    if not tool_list:
+        return
+    names = _tool_names_from_openai_tools(tool_list)
+    parts: list[str] = [_TOOL_POLICY]
+    if "mws_list_models" in names:
+        parts.append(_MWS_MODELS_HINT)
+    if "execute_python" in names:
+        parts.append(_EXECUTE_PYTHON_GUIDANCE)
+    hint = "\n\n".join(parts)
+    for m in messages:
+        if m.get("role") != "system":
+            continue
+        c = m.get("content")
+        if isinstance(c, str):
+            m["content"] = c.rstrip() + "\n\n" + hint
+        elif isinstance(c, list):
+            merged = False
+            for part in reversed(c):
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") in ("text", "input_text"):
+                    key = "text" if "text" in part else "input_text"
+                    part[key] = str(part.get(key) or "").rstrip() + "\n\n" + hint
+                    merged = True
+                    break
+            if not merged:
+                c.append({"type": "text", "text": hint})
+        else:
+            m["content"] = (str(c).rstrip() + "\n\n" + hint) if c is not None else hint
+        return
+    messages.insert(0, {"role": "system", "content": hint})
+
 
 def _first_choice(data: dict[str, Any]) -> dict[str, Any]:
     choices = data.get("choices")
@@ -132,6 +201,8 @@ def run_agent_chat(
     """
     work = copy.deepcopy(messages)
     tool_list = get_parent_tools() if tools is None else tools
+    if tool_list:
+        _inject_tool_guidance(work, tool_list=tool_list)
     last_raw: dict[str, Any] | None = None
     rounds = 0
 
