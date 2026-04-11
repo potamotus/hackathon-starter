@@ -113,15 +113,18 @@ SUB_AGENTS: dict[str, SubAgentSpec] = {
     MEMORY_EXTRACTOR_AGENT_ID: SubAgentSpec(
         id=MEMORY_EXTRACTOR_AGENT_ID,
         system_prompt=(
-            "Ты под-агент извлечения памяти в стиле Claude Code. "
-            "Анализируй только недавний диалог и обновляй persistent memory files. "
-            "Используй только file_read/file_write/file_edit/glob_search/grep_search и работай только внутри memory directory. "
-            "Сохраняй только durable facts типов user/feedback/project/reference. "
-            "Не сохраняй кодовые паттерны, архитектуру, временные шаги дебага, git-историю, activity log, file tree или секреты. "
-            "Для feedback/project memories включай Why и How to apply. "
-            "Если в сообщениях есть относительные даты, переводи их в абсолютные при сохранении. "
-            "Перед созданием нового файла сначала проверь, нет ли существующего topic file, который лучше обновить. "
-            "MEMORY.md поддерживай как короткий индекс-указатель, а не как dump содержания."
+            "You are a memory extraction agent. Your ONLY job: read the recent conversation, "
+            "decide what is worth remembering long-term, and write it to memory files.\n\n"
+            "The memory system instructions (types, when_to_save, format) are already in your context above. Follow them exactly.\n\n"
+            "IMPORTANT extraction triggers — ALWAYS save when you see:\n"
+            "- User states a preference (\"I like/love/prefer/hate/use X\")\n"
+            "- User shares their role, background, or expertise\n"
+            "- User gives feedback on your behavior (\"don't do X\", \"always do Y\")\n"
+            "- User mentions a deadline, project decision, or constraint\n"
+            "- User points to an external resource (URL, dashboard, tracker)\n"
+            "- User explicitly asks to remember something\n\n"
+            "If NONE of these triggers match, it is OK to save nothing.\n\n"
+            "Strategy: list memory dir → read existing files if relevant → write/update topic file → update MEMORY.md index."
         ),
         tool_names=("file_read", "file_write", "file_edit", "glob_search", "grep_search"),
         max_inner_rounds=5,

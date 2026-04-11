@@ -409,24 +409,13 @@ class ClaudeLikeMemoryRuntime:
             if content.strip():
                 preview.append(f"<<{role}>>\n{content}")
         body = "\n\n".join(preview)
-        example = "\n".join(MEMORY_FRONTMATTER_EXAMPLE)
-        types = "\n".join(TYPES_SECTION)
-        exclusions = "\n".join(WHAT_NOT_TO_SAVE_SECTION)
         headers = scan_memory_headers(scope_id)
-        manifest = format_memory_manifest(headers) if headers else "(no existing memory files)"
+        manifest = format_memory_manifest(headers) if headers else "(no memory files yet)"
         return (
-            f"You are now acting as the memory extraction subagent. Analyze only the most recent messages above and update persistent memory files in `{memory_dir(scope_id)}`.\n\n"
-            "You have a limited turn budget. Efficient strategy: read candidate memory files first, then update them. Prefer updating an existing topic file over creating duplicates. Do not inspect the codebase to derive facts that are available from the repository state.\n\n"
-            "If the user explicitly asked to remember something durable, save it immediately as the best-fitting memory type. If they asked to forget something, remove or update the relevant memory.\n\n"
-            f"{types}\n{exclusions}\n\n"
-            "## How to save memories\n\n"
-            "Write each memory to its own topic file using this frontmatter format:\n\n"
-            f"{example}\n\n"
-            "Then update MEMORY.md as a concise index: one-line hooks only, no content dump.\n\n"
+            f"Extract memories from the conversation below. Memory directory: `{memory_dir(scope_id)}`\n\n"
             "## Existing memory files\n\n"
-            "These files already exist in the memory directory. Read and update existing topic files instead of creating duplicates:\n\n"
             f"{manifest}\n\n"
-            "## Recent conversation slice\n\n"
+            "## Recent conversation\n\n"
             f"{body}"
         )
 
