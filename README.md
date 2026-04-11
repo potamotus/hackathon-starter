@@ -94,9 +94,40 @@ Architecture:
 1. Скопируйте `.env.example` → `.env`, укажите `MWS_API_KEY` (и при желании `WEBUI_SECRET_KEY`).
 2. Запуск: `docker compose up --build`
 3. UI: [http://localhost:3000](http://localhost:3000) (порт задаётся `OPEN_WEBUI_PORT`).
-4. **Модели:** список подтягивается с MWS через **`/v1/models`**; в шапке чата выберите модель **вручную** (автовыбор и тулзы не подключались). Подробнее: [docs/openwebui-ux.md](docs/openwebui-ux.md).
-5. Бэкенд UI — [Open WebUI](https://github.com/open-webui/open-webui), провайдер — MWS GPT (`OPENAI_API_BASE_URL` в `docker-compose.yml`). В compose заданы `BYPASS_MODEL_ACCESS_CONTROL`, `WEBUI_NAME`, `DEFAULT_LOCALE`.
-6. Опционально FastAPI: [http://localhost:8000/health](http://localhost:8000/health).
+4. **Модели:** список подтягивается через наш FastAPI (`GET /v1/models` → MWS). В шапке чата выберите модель **вручную** (автовыбор — отдельная задача).
+5. **Архитектура:** Open WebUI → FastAPI-прокси (`api` в compose) → MWS GPT. По умолчанию `OPENAI_API_BASE_URL=http://api:8000/v1` — чат идёт через **агентский** JSON-цикл с тулами. **Обычный чат без тулов:** заведите второе подключение OpenAI в WebUI с тем же ключом и **`OPENAI_API_BASE_URL=http://api:8000/v1/plain`** (эндпоинты `…/v1/plain/models` и `…/v1/plain/chat/completions` зеркалят OpenAI-контракт без агента). Либо в одном подключении в теле запроса передавайте **`"use_agent": false`** (если клиент умеет доп. поля JSON).
+6. Единая точка входа в LLM — `certified_turtles.services.llm.LLMService`: `list_models()`, `chat(...)` (single-shot с автоинъекцией тулов), `run_agent(...)` (полный tool-calling loop). Все API-эндпоинты и CLI идут через неё, отдельные `MWSGPTClient` по сервису не плодим.
+7. Эндпоинты FastAPI (`http://localhost:8000`):
+   - `GET /health`
+   - `GET /v1/models`, `POST /v1/chat/completions` — OpenAI-совместимый прокси для Open WebUI (`stream` поддерживается псевдо-чанком); агент по умолчанию.
+   - `GET /v1/plain/models`, `POST /v1/plain/chat/completions` — то же для UI с base `…/v1/plain` (чат без агента и тулов).
+   - `POST /api/v1/agent/chat` — наш собственный шейп агент-цикла (оставлен для CLI/скриптов).
+   - `POST /api/v1/uploads` — загрузка файла в рабочую область агента (multipart); дальше тул `read_workspace_file` по полю `file_id`.
+   - `GET /files/{filename}` — раздача файлов из `GENERATED_FILES_DIR` (например `.pptx`).
+   - `GET /files/python_runs/{run_id}/{filename}` — артефакты после `execute_python` (графики и т.д.). В docker-compose монтируется том `generated-files:/data/generated` (внутри также `uploads/`).
+   CLI: `uv run mws-gpt agent --model <id> -p "…"`.
+
+### Доступные тулы и под-агенты
+
+Примитивные тулы (`register_tool`, подключаются автоматически):
+
+- **`web_search`** — текстовый поиск в DuckDuckGo (`ddgs`). Отбрасывает URL-запросы и подсказывает вызвать `fetch_url`.
+- **`fetch_url`** — скачивание страницы и преобразование HTML→text (stdlib, без браузера).
+- **`generate_image`** — генерация картинки через Pollinations.ai (free-tier, без ключа). Возвращает URL и готовую markdown-вставку `![](…)`, которую Open WebUI рендерит инлайн.
+- **`generate_presentation`** — сборка `.pptx` через `python-pptx` на шаблоне `src/certified_turtles/assets/theme0.pptx` (как в [AI_bot_with_files](https://github.com/nikitavivat/AI_bot_with_files)): титул, контент, раздел/thanks, слайд с картинкой по `image_url`. Свой шаблон: `PPTX_THEME_PATH`. Файл в `GENERATED_FILES_DIR`, URL через `PUBLIC_API_BASE_URL`.
+- **`read_workspace_file`** — чтение текста из файла, предварительно загруженного через `POST /api/v1/uploads` (поле `file_id`).
+- **`execute_python`** — запуск ограниченного Python (отдельный процесс, таймаут) для анализа данных и графиков (`numpy` / `matplotlib` / `pandas`); графики сохранять в `CT_RUN_OUTPUT_DIR`, ссылки — `GET /files/python_runs/{run_id}/…`.
+- **`google_docs_read` / `google_docs_append`** — **чтение:** достаточно открыть документ для **всех по ссылке (читатель)** и дать ссылку — сервер тянет `export?format=txt` без личного ключа пользователя; при настроенном service account сначала используется API (приватные доки, расшаренные на `client_email`). **Запись (`append`):** нужен `GOOGLE_DOCS_CREDENTIALS_JSON` и шаринг на email сервис-аккаунта с ролью **Редактор** (см. `.env.example`). Проверка: `GET /health` → `capabilities.google_docs`.
+
+Под-агенты (`agents/registry.py`, вызываются родительским LLM как `agent_{id}`):
+
+- **`agent_research`** — быстрый ресёрч: `web_search` + `fetch_url`.
+- **`agent_writer`** — только текст, без внешних инструментов (сокращение/переписывание).
+- **`agent_deep_research`** — многошаговое глубокое исследование: декомпозирует вопрос, итеративно ходит `web_search` → `fetch_url`, в конце отдаёт markdown-отчёт (TL;DR, ключевые выводы, источники). До 16 внутренних раундов.
+
+### Голос и live-режим
+
+MWS GPT не предоставляет audio-эндпоинтов, поэтому STT/TTS не проксируется через бэкенд — вместо этого в `docker-compose.yml` включены переменные Open WebUI `AUDIO_STT_ENGINE=web`, `AUDIO_TTS_ENGINE=web`, `ENABLE_AUDIO_CONVERSATION=True`. Это активирует **Web Speech API** в браузере: распознавание голоса и синтез речи — клиентсайдом. Кнопка «Call» в Open WebUI даёт непрерывный голосовой диалог (live-режим) поверх нашего tool-агента.
 
 **Без Docker (только uv):** из **корня репозитория** — `uv sync --extra openwebui`. В `.env` должен быть `MWS_API_KEY`. Перед запуском WebUI экспортируйте MWS в переменные, которые ждёт Open WebUI (в одной оболочке):
 
