@@ -96,7 +96,7 @@ Architecture:
 3. UI: [http://localhost:3000](http://localhost:3000) (порт задаётся `OPEN_WEBUI_PORT`).
 4. **Модели:** список подтягивается с MWS через **`/v1/models`**; в шапке чата выберите модель **вручную** (автовыбор и тулзы не подключались). Подробнее: [docs/openwebui-ux.md](docs/openwebui-ux.md).
 5. Бэкенд UI — [Open WebUI](https://github.com/open-webui/open-webui), провайдер — MWS GPT (`OPENAI_API_BASE_URL` в `docker-compose.yml`). В compose заданы `BYPASS_MODEL_ACCESS_CONTROL`, `WEBUI_NAME`, `DEFAULT_LOCALE`.
-6. Опционально FastAPI: [http://localhost:8000/health](http://localhost:8000/health). **Агент с tool calling:** `POST http://localhost:8000/api/v1/agent/chat` (JSON: `model`, `messages`, опционально `max_tool_rounds`, `temperature`, `max_tokens`). Встроен инструмент `web_search` (DuckDuckGo). CLI: `uv run mws-gpt agent --model <id> -p "…"`.
+6. Опционально FastAPI: [http://localhost:8000/health](http://localhost:8000/health). **Оркестратор LLM:** `POST http://localhost:8000/api/v1/agent/chat` — в `tools` автоматически попадают зарегистрированные **примитивные тулы** (`register_tool` в коде, см. `src/certified_turtles/tools/builtins/`) и **под-агенты** из `agents/registry.py` как отдельные функции `agent_{id}` (например `agent_research`). CLI: `uv run mws-gpt agent --model <id> -p "…"`.
 
 **Без Docker (только uv):** из **корня репозитория** — `uv sync --extra openwebui`. В `.env` должен быть `MWS_API_KEY`. Перед запуском WebUI экспортируйте MWS в переменные, которые ждёт Open WebUI (в одной оболочке):
 

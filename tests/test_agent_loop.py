@@ -16,7 +16,7 @@ class FakeMWSClient:
 
 
 def test_agent_finishes_after_tool_round(monkeypatch):
-    monkeypatch.setattr("certified_turtles.agents.loop.run_tool", lambda name, args: "MOCK_RESULT")
+    monkeypatch.setattr("certified_turtles.agents.loop.run_primitive_tool", lambda name, args: "MOCK_RESULT")
     r1 = {
         "choices": [
             {
@@ -53,7 +53,7 @@ def test_agent_finishes_after_tool_round(monkeypatch):
 
 
 def test_agent_truncates_when_rounds_exhausted(monkeypatch):
-    monkeypatch.setattr("certified_turtles.agents.loop.run_tool", lambda n, a: "x")
+    monkeypatch.setattr("certified_turtles.agents.loop.run_primitive_tool", lambda n, a: "x")
     r_tool = {
         "choices": [
             {
