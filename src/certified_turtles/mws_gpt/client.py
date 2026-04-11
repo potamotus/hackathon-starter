@@ -75,9 +75,10 @@ class MWSGPTClient:
     def chat_completions(
         self,
         model: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         **extra: Any,
     ) -> Any:
+        """POST /v1/chat/completions. В `extra` можно передать tools, tool_choice, response_format и др."""
         body: dict[str, Any] = {"model": model, "messages": messages}
         body.update(extra)
         return self._request("POST", "/v1/chat/completions", payload=body)

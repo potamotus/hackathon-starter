@@ -12,11 +12,11 @@ ENV UV_COMPILE_BYTECODE=1 \
 # слой зависимостей (кеш при неизменном lock)
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-install-project
+    uv sync --frozen --no-group dev --no-install-project
 
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen
+    uv sync --frozen --no-group dev
 
 EXPOSE 8000
 

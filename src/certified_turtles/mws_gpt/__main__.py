@@ -5,6 +5,8 @@ import json
 import os
 import sys
 
+from certified_turtles.services.llm import LLMService
+
 from .client import DEFAULT_BASE_URL, MWSGPTClient, MWSGPTError
 
 
@@ -87,6 +89,27 @@ def cmd_embed(args: argparse.Namespace, client: MWSGPTClient) -> int:
     return 0
 
 
+def cmd_agent(args: argparse.Namespace, client: MWSGPTClient) -> int:
+    messages: list[dict] = []
+    if args.system:
+        messages.append({"role": "system", "content": args.system})
+    messages.append({"role": "user", "content": args.prompt})
+    extra: dict = {}
+    if args.temperature is not None:
+        extra["temperature"] = args.temperature
+    if args.max_tokens is not None:
+        extra["max_tokens"] = args.max_tokens
+    service = LLMService(client)
+    out = service.run_agent(
+        args.model,
+        messages,
+        max_tool_rounds=args.max_tool_rounds,
+        **extra,
+    )
+    _print_json(out)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _load_env_files()
 
@@ -133,6 +156,28 @@ def main(argv: list[str] | None = None) -> int:
     p_emb.add_argument("--model", required=True)
     p_emb.add_argument("--input", "-i", dest="input_text", required=True)
     p_emb.set_defaults(func=cmd_embed)
+
+    p_agent = sub.add_parser(
+        "agent",
+        help="Агент: chat/completions с tools (web_search) и циклом до финального ответа",
+    )
+    p_agent.add_argument("--model", required=True)
+    p_agent.add_argument(
+        "--prompt",
+        "-p",
+        required=True,
+        help="Запрос пользователя (одно сообщение user)",
+    )
+    p_agent.add_argument("--system", "-s", default=None, help="Системный промпт")
+    p_agent.add_argument("--temperature", type=float, default=None)
+    p_agent.add_argument("--max-tokens", type=int, default=None)
+    p_agent.add_argument(
+        "--max-tool-rounds",
+        type=int,
+        default=int(os.environ.get("AGENT_MAX_TOOL_ROUNDS", "10")),
+        help="Максимум запросов к chat/completions (включая вызовы после tool)",
+    )
+    p_agent.set_defaults(func=cmd_agent)
 
     ns = parser.parse_args(argv)
     try:
