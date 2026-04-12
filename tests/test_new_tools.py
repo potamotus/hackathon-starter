@@ -15,7 +15,6 @@ def test_new_primitives_registered():
     assert "generate_presentation" in names
     assert "read_workspace_file" in names
     assert "execute_python" in names
-    assert "mws_list_models" in names
     assert "google_docs_read" in names
     assert "google_docs_append" in names
 
@@ -29,7 +28,6 @@ def test_parent_tools_expose_all():
         "generate_presentation",
         "read_workspace_file",
         "execute_python",
-        "mws_list_models",
         "google_docs_read",
         "google_docs_append",
     ):
@@ -198,19 +196,18 @@ def test_web_search_refuses_url_query():
     assert data.get("error") == "bad_query"
 
 
-def test_mws_list_models_primitive(monkeypatch):
-    class StubClient:
-        def __init__(self, api_key=None, *, base_url=None):
-            pass
-
-        def list_models(self):
-            return {"object": "list", "data": [{"id": "mws-gpt-alpha", "owned_by": "mws"}]}
-
-    monkeypatch.setattr(
-        "certified_turtles.tools.builtins.mws_list_models.MWSGPTClient",
-        StubClient,
+def test_execute_python_allows_urllib_and_http_client(monkeypatch, tmp_path):
+    """HTTP из кода: urllib/http.client/ssl и requests (белый список)."""
+    monkeypatch.setenv("GENERATED_FILES_DIR", str(tmp_path / "gen"))
+    code = (
+        "import http.client\n"
+        "import ssl\n"
+        "import urllib.parse\n"
+        "import urllib.request\n"
+        "import requests\n"
+        "print('imports_ok', requests.__version__)\n"
     )
-    out = run_primitive_tool("mws_list_models", {})
+    out = run_primitive_tool("execute_python", {"code": code})
     data = json.loads(out)
-    assert data["data"][0]["id"] == "mws-gpt-alpha"
-    assert data["count"] == 1
+    assert data.get("returncode") == 0, data
+    assert "imports_ok" in (data.get("stdout") or "")

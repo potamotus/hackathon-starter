@@ -4,10 +4,13 @@ import copy
 import json
 import logging
 import os
+import re
 from typing import Any
 
+from certified_turtles.agents.execute_python_intent import llm_should_skip_execute_python
 from certified_turtles.agents.json_agent_protocol import (
     PROTOCOL_JSON_REPAIR_USER,
+    PROTOCOL_USER_PREFIX,
     build_protocol_system_message,
     extract_user_visible_assistant_text,
     message_text_content,
@@ -21,16 +24,30 @@ from certified_turtles.mws_gpt.client import MWSGPTClient
 from certified_turtles.agent_debug_log import agent_logger, debug_clip, summarize_messages
 from certified_turtles.tools.parent_tools import get_parent_tools, parse_agent_tool_name
 from certified_turtles.tools.registry import openai_tools_for_names, run_primitive_tool
+from certified_turtles.prompts import load_prompt
 
 logger = logging.getLogger(__name__)
 _agent_log = agent_logger("loop")
 
 # Open WebUI кладёт RAG вторым system («ответь пользователю текстом») — ломает JSON-протокол.
-_SYSTEM_FORMAT_OVERRIDE = """ПРИОРИТЕТ ФОРМАТА (выше фраз «Respond to the user», «Provide a clear response», цитат [id], «Do not use XML»):
-Каждый твой ответ role=assistant — ровно один JSON-объект с ключами assistant_markdown и calls. Текст или markdown вне этого JSON запрещены.
-Для таблиц/файлов: скопируй реальный file_id из строки file_id="…" рядом с [CT: RAG-источник …] (это не номер цитаты [1]). Затем workspace_file_path и/или execute_python с file_id и кодом на pandas; не подставляй плейсхолдеры и не вызывай workspace_file_path внутри Python.
+_SYSTEM_FORMAT_OVERRIDE = load_prompt("system_format_override.md").strip()
 
-"""
+
+def _last_chat_user_plain_text(work: list[dict[str, Any]]) -> str:
+    """Последнее user-сообщение чата (без служебных [CT_PROTO_JSON] и ремонта JSON)."""
+    for m in reversed(work):
+        if m.get("role") != "user":
+            continue
+        t = message_text_content(m)
+        s = t.strip()
+        if not s:
+            continue
+        if s.startswith(PROTOCOL_USER_PREFIX):
+            continue
+        if s.startswith("[CT_PROTO_JSON_REPAIR]"):
+            continue
+        return t
+    return ""
 
 
 def _json_repair_attempts_budget() -> int:
@@ -40,6 +57,28 @@ def _json_repair_attempts_budget() -> int:
     except (TypeError, ValueError):
         n = 2
     return max(0, min(5, n))
+
+
+def _json_protocol_max_tokens_for_request(call_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """
+    Для JSON-протокола задаём max_tokens выше типичного дефолта API (часто 4096), иначе длинный
+    assistant_markdown обрывает JSON посередине → parse_agent_response падает.
+    CT_AGENT_JSON_MAX_COMPLETION_TOKENS: по умолчанию 8192; 0 = не задавать (дефолт API).
+    """
+    raw = os.environ.get("CT_AGENT_JSON_MAX_COMPLETION_TOKENS")
+    if raw is not None and raw.strip() == "0":
+        return call_kwargs
+    if raw is None or not raw.strip():
+        n = 8192
+    else:
+        try:
+            n = int(raw.strip())
+        except (TypeError, ValueError):
+            n = 8192
+    n = max(1024, min(32768, n))
+    if "max_tokens" in call_kwargs:
+        return call_kwargs
+    return {**call_kwargs, "max_tokens": n}
 
 
 def _tool_names_from_openai_tools(tool_list: list[dict[str, Any]]) -> set[str]:
@@ -53,6 +92,37 @@ def _tool_names_from_openai_tools(tool_list: list[dict[str, Any]]) -> set[str]:
     return names
 
 
+_OWEBUI_TOOL_ROUTER_PARA = re.compile(
+    r"(?ms)^\s*Available Tools:\s*\[[^\]]*\]\s*"
+    r".*?(?=\n\s*\n|\Z)",
+)
+
+
+def _strip_openwebui_tool_router_noise(text: str) -> str:
+    """Убирает блоки роутера Open WebUI («выбери tool из списка»), попадающие в контекст под-агента.
+
+    Без этого модель видит «Available Tools: []» и шлёт вызовы вроде `agent_research` / выдуманных тулов,
+    хотя у под-агента другой каталог — ломается JSON-протокол и цикл уходит в repair/лимит раундов.
+    """
+    s = text.strip()
+    if not s:
+        return s
+    s = _OWEBUI_TOOL_ROUTER_PARA.sub("", s)
+    parts = re.split(r"\n\s*\n+", s)
+    kept: list[str] = []
+    for p in parts:
+        pl = p.lstrip()
+        low = pl.lower()
+        if low.startswith("available tools:"):
+            continue
+        if "choose and return the correct tool" in low and "available tools" in low:
+            continue
+        if "return only the json object" in low and "tool_calls" in low:
+            continue
+        kept.append(p.strip())
+    return "\n\n".join(x for x in kept if x).strip()
+
+
 def _parent_context_body(role: str, body: str) -> str:
     """Очищает родительскую историю перед передачей под-агенту.
 
@@ -63,7 +133,8 @@ def _parent_context_body(role: str, body: str) -> str:
         return body
     marker = "--- Контекст и инструкции чата (Open WebUI / RAG) ---"
     if marker in body:
-        return body.split(marker, 1)[1].strip()
+        tail = body.split(marker, 1)[1].strip()
+        return _strip_openwebui_tool_router_noise(tail)
     kept: list[str] = []
     for ln in body.splitlines():
         low = ln.lower()
@@ -295,6 +366,8 @@ def run_agent_chat(
                 call_kwargs["tool_choice"] = tool_choice
             if tools is not None:
                 call_kwargs["tools"] = tools
+        else:
+            call_kwargs = _json_protocol_max_tokens_for_request(call_kwargs)
         _agent_log.debug(
             "--- round %s/%s messages_in_flight=%s call_kwargs_keys=%s",
             rounds,
@@ -420,6 +493,24 @@ def run_agent_chat(
             if name not in allowed:
                 outputs.append(
                     json.dumps({"error": "unknown_tool", "name": name}, ensure_ascii=False),
+                )
+                continue
+            if name == "execute_python" and llm_should_skip_execute_python(
+                client,
+                model,
+                _last_chat_user_plain_text(work),
+            ):
+                outputs.append(
+                    json.dumps(
+                        {
+                            "error": "execute_python_skipped",
+                            "detail": (
+                                "Запрос выглядит как выдача кода без запуска. "
+                                "Положи код в assistant_markdown и используй calls=[]."
+                            ),
+                        },
+                        ensure_ascii=False,
+                    ),
                 )
                 continue
             out = _execute_tool_call(

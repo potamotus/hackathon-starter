@@ -86,24 +86,37 @@ def _final_assistant_content(completion: dict[str, Any]) -> str:
     return extract_user_visible_assistant_text(message_text_content(msg))
 
 
+# Длинный ответ одним SSE-событием ломает JSON.parse в Open WebUI (ошибка вида column ~3k в chunk JS).
+_SSE_CONTENT_CHUNK_CHARS = 400
+
+
 def _sse_stream(model: str, completion: dict[str, Any]):
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
     content = _final_assistant_content(completion)
-    chunk = {
-        "id": cid,
-        "object": "chat.completion.chunk",
-        "created": created,
-        "model": model,
-        "choices": [
-            {
-                "index": 0,
-                "delta": {"role": "assistant", "content": content},
-                "finish_reason": "stop",
-            }
-        ],
-    }
-    yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+
+    def _line(delta: dict[str, Any], finish_reason: str | None) -> str:
+        payload = {
+            "id": cid,
+            "object": "chat.completion.chunk",
+            "created": created,
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": delta,
+                    "finish_reason": finish_reason,
+                }
+            ],
+        }
+        return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    # Как у OpenAI: сначала роль, затем куски content, в конце finish_reason (короткие JSON-строки).
+    yield _line({"role": "assistant"}, None)
+    for i in range(0, len(content), _SSE_CONTENT_CHUNK_CHARS):
+        piece = content[i : i + _SSE_CONTENT_CHUNK_CHARS]
+        yield _line({"content": piece}, None)
+    yield _line({}, "stop")
     yield "data: [DONE]\n\n"
 
 

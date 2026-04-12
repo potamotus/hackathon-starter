@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import json
 
-from certified_turtles.agents.loop import _parent_dialog_snippet, run_agent_chat
+from certified_turtles.agents.loop import _parent_dialog_snippet, _strip_openwebui_tool_router_noise, run_agent_chat
 from certified_turtles.tools.registry import openai_tools_for_names
 
 
@@ -154,6 +154,10 @@ def test_protocol_system_lists_web_search_only(monkeypatch):
 
 
 def test_execute_python_autobinds_file_id_from_workspace_tool(monkeypatch):
+    monkeypatch.setattr(
+        "certified_turtles.agents.loop.llm_should_skip_execute_python",
+        lambda client, model, text: False,
+    )
     calls_seen: list[tuple[str, dict]] = []
 
     def fake_tool(name: str, args: dict):
@@ -224,3 +228,31 @@ def test_parent_dialog_snippet_drops_protocol_catalog_from_system():
     assert "agent_data_analyst" not in out
     assert "file_id=" in out
     assert "<source" in out
+
+
+def test_strip_openwebui_tool_router_noise_removes_available_tools_block():
+    raw = (
+        "Available Tools: []\n\n"
+        "Your task is to choose and return the correct tool(s) from the list of available tools "
+        "based on the query. Follow these guidelines:\n"
+        "- Return only the JSON object.\n\n"
+        '[CT: note file_id="z.csv"]'
+    )
+    out = _strip_openwebui_tool_router_noise(raw)
+    assert "Available Tools" not in out
+    assert "choose and return the correct tool" not in out.lower()
+    assert "file_id=" in out
+
+
+def test_parent_dialog_snippet_no_openwebui_router_after_marker():
+    body = (
+        "IGNORED_BEFORE_MARKER\n"
+        "--- Контекст и инструкции чата (Open WebUI / RAG) ---\n\n"
+        "Available Tools: []\n\n"
+        "Your task is to choose and return the correct tool(s) from the list of available tools "
+        "based on the query.\n\n"
+        "History:\nUSER: hi\n"
+    )
+    out = _parent_dialog_snippet([{"role": "system", "content": body}])
+    assert "Available Tools" not in out
+    assert "History:" in out

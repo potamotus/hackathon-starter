@@ -7,6 +7,7 @@ import os
 import re
 from typing import Any
 
+from certified_turtles.prompts import load_prompt
 from certified_turtles.tools.registry import ToolSpec, register_tool
 
 logger = logging.getLogger(__name__)
@@ -80,35 +81,24 @@ def agent_system_prompt_google_docs_section() -> str:
     email = google_docs_client_email()
     ready = google_docs_ready()
     cred_path = google_docs_credentials_path()
-    lines = [
-        "=== Google Docs (объясни пользователю простыми шагами) ===",
-        "Тулы: **google_docs_read** — текст документа; **google_docs_append** — дописать plain text в конец.",
-        "",
-        "**Чтение без ключа сервера (для пользователя):** в Google Doc → «Настройки доступа» / «Поделиться» → "
-        "«Ограничений нет» или **«Все, у кого есть ссылка»** → роль **Читатель** (или выше). Пользователь вставляет "
-        "ссылку на документ — вызывай google_docs_read с document_id = ссылка или ID из URL.",
-        "",
-        "**Запись в документ (google_docs_append):** нужен JSON service account на сервере и расшаривание документа "
-        "на email сервис-аккаунта с ролью **Редактор** (это настраивает админ, не «доступ для всех»).",
-    ]
     if ready and email:
-        lines.append(f"На сервере задан ключ: client_email для шаринга при записи: **{email}**.")
+        status_paragraph = f"На сервере задан ключ: client_email для шаринга при записи: **{email}**."
     elif ready and not email:
-        lines.append(
+        status_paragraph = (
             "Файл ключа на сервере есть, но не прочитан client_email — проверьте формат JSON service account."
         )
     elif google_docs_python_libs_ok() and cred_path and not os.path.isfile(cred_path):
-        lines.append(
+        status_paragraph = (
             "Указан GOOGLE_DOCS_CREDENTIALS_JSON, но файла по пути нет — попроси админа проверить volume в Docker."
         )
     elif not google_docs_python_libs_ok():
-        lines.append("Пакеты Google API не установлены в API (для append нужен образ с `extra google`).")
+        status_paragraph = "Пакеты Google API не установлены в API (для append нужен образ с `extra google`)."
     else:
-        lines.append("Ключ сервис-аккаунта на сервере не задан — **чтение по публичной ссылке всё равно работает**; append без ключа недоступен.")
-    lines.append(
-        "Если read вернул google_docs_public_access_failed — повтори шаги с доступом «по ссылке» для читателя."
-    )
-    return "\n".join(lines)
+        status_paragraph = (
+            "Ключ сервис-аккаунта на сервере не задан — **чтение по публичной ссылке всё равно работает**; "
+            "append без ключа недоступен."
+        )
+    return load_prompt("google_docs_agent_section.md").format(status_paragraph=status_paragraph).strip()
 
 
 def _build_docs_service():

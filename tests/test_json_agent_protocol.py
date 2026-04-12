@@ -28,11 +28,11 @@ def test_parse_lenient_second_object_in_stream():
 
 
 def test_parse_fenced_json():
-    body = '{"assistant_markdown":"","calls":[{"name":"mws_list_models","arguments":{}}]}'
+    body = '{"assistant_markdown":"","calls":[{"name":"web_search","arguments":{"query":"пример"}}]}'
     s = f"Пояснение\n```json\n{body}\n```\n"
     p = parse_agent_response(s)
     assert p is not None
-    assert p["calls"][0]["name"] == "mws_list_models"
+    assert p["calls"][0]["name"] == "web_search"
 
 
 def test_parse_after_redacted_thinking():

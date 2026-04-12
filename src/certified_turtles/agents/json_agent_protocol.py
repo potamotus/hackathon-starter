@@ -13,6 +13,8 @@ import os
 import re
 from typing import Any
 
+from certified_turtles.prompts import load_prompt
+
 logger = logging.getLogger(__name__)
 
 # Модели с «размышлением» часто оборачивают его в теги; мешают извлечению JSON.
@@ -128,40 +130,10 @@ def message_text_content(msg: dict[str, Any]) -> str:
 PROTOCOL_USER_PREFIX = "[CT_PROTO_JSON]"
 
 # Один «ремонтный» user-ход при ответе модели без парсящегося JSON (иначе тулы не вызываются).
-PROTOCOL_JSON_REPAIR_USER = (
-    "[CT_PROTO_JSON_REPAIR] Предыдущий ответ не распознан как JSON протокола — тулы отключены. "
-    "Повтори ответ ОДНИМ JSON-объектом с ключами assistant_markdown и calls, без текста до/после и без ```. "
-    "Если речь о таблице и в истории есть file_id (строка [CT:…]) — вызови workspace_file_path и execute_python."
-)
+PROTOCOL_JSON_REPAIR_USER = load_prompt("protocol_json_repair_user.txt").strip()
 
 # Зашитый контракт (ключи и смысл полей — не переименовывать без правок парсера и тестов).
-PROTOCOL_SPEC = r"""
-ОБЯЗАТЕЛЬНЫЙ ФОРМАТ КАЖДОГО ТВОЕГО ОТВЕТА (role=assistant):
-Ровно один JSON-объект. Без текста до первого «{» и после последнего «}». Без Markdown-ограждений ```.
-
-Структура (все ключи верхнего уровня обязательны, порядок любой):
-{
-  "assistant_markdown": "<строка: итог для пользователя; при вызове тулов можно временно \"\">",
-  "calls": [
-    {"name": "<имя_функции_из_каталога>", "arguments": { } }
-  ]
-}
-
-Правила:
-- "calls": [] — когда инструменты не нужны; тогда "assistant_markdown" должен содержать полный ответ пользователю.
-- Если нужны инструменты — заполни "calls" одним или несколькими объектами; "arguments" — объект (не строка), по схеме параметров функции из каталога.
-- Запрещено отвечать обычным текстом/markdown вне JSON: любой текст до первого «{» или после последней «}» ломает оркестратор и отключает тулы.
-- Один раунд: не смешивай выдуманные шаги. file_id — только точная строка из `file_id="…"` в сообщении с [CT: RAG-источник …] или из ответа workspace_file_path; никогда не подставляй `[CT:…]`, «источник», многоточие или текст инструкции.
-- Для файлов: предпочтительно один вызов `workspace_file_path`, в следующем раунде `execute_python` с реальным кодом и путём из JSON или с тем же file_id в аргументе `file_id` тула execute_python (тогда в коде есть CT_DATA_FILE_ABSPATH). Не вызывай `workspace_file_path()` внутри Python — это не функция в скрипте.
-- Запросы про таблицу/CSV/файл/аналитику: почти всегда нужен execute_python (часто после workspace_file_path, если в истории есть file_id из [CT:…]). Не заменяй код перечислением строк из контекста.
-- После служебного сообщения пользователя с префиксом [CT_PROTO_JSON] придут результаты тулов — снова ответь ОДНИМ JSON того же вида.
-
-Пример вызова тула:
-{"assistant_markdown":"","calls":[{"name":"mws_list_models","arguments":{}}]}
-
-Пример финала:
-{"assistant_markdown":"Готово: список моделей выше.","calls":[]}
-""".strip()
+PROTOCOL_SPEC = load_prompt("protocol_spec.md").strip()
 
 
 def _tool_names_in_catalog(tool_list: list[dict[str, Any]]) -> set[str]:
