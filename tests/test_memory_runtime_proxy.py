@@ -60,9 +60,9 @@ def test_openai_proxy_injects_auto_memory_and_writes_transcript(tmp_path, monkey
     sys0 = next(
         call["messages"][0]["content"]
         for call in fake.calls
-        if call["messages"] and call["messages"][0].get("role") == "system" and "# memory" in call["messages"][0].get("content", "")
+        if call["messages"] and call["messages"][0].get("role") == "system" and "# auto memory" in call["messages"][0].get("content", "")
     )
-    assert "# memory" in sys0
+    assert "# auto memory" in sys0
     assert "MEMORY.md" in sys0
     assert "# session_memory" in sys0
     transcript = read_transcript_events("chat-1")

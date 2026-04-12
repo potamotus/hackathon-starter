@@ -86,6 +86,33 @@ TRUSTING_RECALL_SECTION: tuple[str, ...] = (
     'A memory that summarizes repo state is frozen in time. If the user asks about current or recent state, prefer reading the code or using current project evidence over the snapshot.',
 )
 
+MEMORY_PERSISTENCE_SECTION: tuple[str, ...] = (
+    "## Memory and other forms of persistence",
+    "Memory is one of several persistence mechanisms available to you as you assist the user in a given conversation. The distinction is often that memory can be recalled in future conversations and should not be used for persisting information that is only useful within the scope of the current conversation.",
+    "- When to use or update a plan instead of memory: If you are about to start a non-trivial implementation task and would like to reach alignment with the user on your approach you should use a Plan rather than saving this information to memory. Similarly, if you already have a plan within the conversation and you have changed your approach persist that change by updating the plan rather than saving a memory.",
+    "- When to use or update tasks instead of memory: When you need to break your work in current conversation into discrete steps or keep track of your progress use tasks instead of saving to memory. Tasks are great for persisting information about the work that needs to be done in the current conversation, but memory should be reserved for information that will be useful in future conversations.",
+)
+
+
+def build_searching_past_context_section(memory_dir: str) -> tuple[str, ...]:
+    """Build the 'Searching past context' section matching Claude Code's buildSearchingPastContextSection."""
+    return (
+        "## Searching past context",
+        "",
+        "When looking for past context:",
+        "1. Search topic files in your memory directory:",
+        "```",
+        f'grep_search with pattern="<search term>" path="{memory_dir}" glob="*.md"',
+        "```",
+        "2. Session transcript logs (last resort — large files, slow):",
+        "```",
+        f'grep_search with pattern="<search term>" path="{memory_dir}/../" glob="*.jsonl"',
+        "```",
+        "Use narrow search terms (error messages, file paths, function names) rather than broad keywords.",
+        "",
+    )
+
+
 MEMORY_FRONTMATTER_EXAMPLE: tuple[str, ...] = (
     "```markdown",
     "---",
@@ -99,32 +126,78 @@ MEMORY_FRONTMATTER_EXAMPLE: tuple[str, ...] = (
 )
 
 
-def memory_instructions(include_index_rules: bool = True) -> str:
+def memory_instructions(
+    memory_dir: str = "",
+    *,
+    include_index_rules: bool = True,
+    skip_index: bool = False,
+) -> str:
+    """Build the typed-memory behavioral instructions matching Claude Code's buildMemoryLines()."""
+    dir_exists_guidance = (
+        "This directory already exists — write to it directly with the file_write tool "
+        "(do not run mkdir or check for its existence)."
+    )
     lines = [
-        "# session_guidance",
-        "You have a Claude-like persistent memory system and session memory system.",
+        "# auto memory",
         "",
-        *WHEN_TO_ACCESS_SECTION,
+        f"You have a persistent, file-based memory system at `{memory_dir}`. {dir_exists_guidance}"
+        if memory_dir
+        else "You have a persistent, file-based memory system.",
         "",
-        *TRUSTING_RECALL_SECTION,
+        "If the user explicitly asks you to remember something, save it immediately as whichever type fits best. If they ask you to forget something, find and remove the relevant entry.",
+        "",
+        "When responding to the user, never expose internal file paths, file names, or directory structures of the memory system. Describe actions in user-friendly terms instead.",
         "",
         *TYPES_SECTION,
         *WHAT_NOT_TO_SAVE_SECTION,
     ]
     if include_index_rules:
-        lines.extend(
-            (
-                "",
-                "## How to save memories",
-                "",
-                "Write each memory to its own topic file using the documented frontmatter format.",
-                "",
-                *MEMORY_FRONTMATTER_EXAMPLE,
-                "",
-                "MEMORY.md is an index, not a dump. Each line should be a compact pointer to a topic file. Keep MEMORY.md concise because lines after 200 and bytes after ~25KB are not guaranteed to stay visible.",
-                "- Organize memory semantically by topic, not chronologically.",
-                "- Update existing files instead of creating near-duplicates.",
-                "- Remove or correct memories that become wrong or outdated.",
+        if skip_index:
+            lines.extend(
+                (
+                    "",
+                    "## How to save memories",
+                    "",
+                    "Write each memory to its own file (e.g., `user_role.md`, `feedback_testing.md`) using this frontmatter format:",
+                    "",
+                    *MEMORY_FRONTMATTER_EXAMPLE,
+                    "",
+                    "- Organize memory semantically by topic, not chronologically",
+                    "- Update or remove memories that turn out to be wrong or outdated",
+                    "- Do not write duplicate memories. First check if there is an existing memory you can update before writing a new one.",
+                )
             )
+        else:
+            lines.extend(
+                (
+                    "",
+                    "## How to save memories",
+                    "",
+                    "Saving a memory is a two-step process:",
+                    "",
+                    "**Step 1** — write the memory to its own file (e.g., `user_role.md`, `feedback_testing.md`) using this frontmatter format:",
+                    "",
+                    *MEMORY_FRONTMATTER_EXAMPLE,
+                    "",
+                    "**Step 2** — add a pointer to that file in `MEMORY.md`. `MEMORY.md` is an index, not a memory — each entry should be one line, under ~150 characters: `- [Title](file.md) — one-line hook`. It has no frontmatter. Never write memory content directly into `MEMORY.md`.",
+                    "",
+                    "- `MEMORY.md` is always loaded into your conversation context — lines after 200 will be truncated, so keep the index concise",
+                    "- Organize memory semantically by topic, not chronologically",
+                    "- Update or remove memories that turn out to be wrong or outdated",
+                    "- Do not write duplicate memories. First check if there is an existing memory you can update before writing a new one.",
+                )
+            )
+    lines.extend(
+        (
+            "",
+            *WHEN_TO_ACCESS_SECTION,
+            "",
+            *TRUSTING_RECALL_SECTION,
+            "",
+            *MEMORY_PERSISTENCE_SECTION,
+            "",
         )
+    )
+    if memory_dir:
+        lines.extend(build_searching_past_context_section(memory_dir))
     return "\n".join(lines)

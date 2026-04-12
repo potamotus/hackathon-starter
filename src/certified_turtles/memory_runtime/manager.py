@@ -11,7 +11,12 @@ from certified_turtles.agents.json_agent_protocol import PROTOCOL_USER_PREFIX, m
 from certified_turtles.mws_gpt.client import MWSGPTClient
 
 from .forking import CacheSafeSnapshot, ForkRuntime
-from .memory_types import MEMORY_FRONTMATTER_EXAMPLE, TYPES_SECTION, WHAT_NOT_TO_SAVE_SECTION
+from .memory_types import (
+    MEMORY_FRONTMATTER_EXAMPLE,
+    TYPES_SECTION,
+    WHAT_NOT_TO_SAVE_SECTION,
+    build_searching_past_context_section,
+)
 from .prompting import build_memory_prompt
 from .storage import (
     append_transcript_event,
@@ -45,6 +50,52 @@ _MICROCOMPACT_TIME_GAP_SEC = 3600
 _MICROCOMPACT_KEEP_RECENT = 6
 _MICROCOMPACT_TOKEN_THRESHOLD = 80_000
 
+# ── Full compact (9-section LLM summary) ────────────────────
+
+AUTOCOMPACT_BUFFER_TOKENS = 13_000
+MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3
+
+_NO_TOOLS_PREAMBLE = (
+    "CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.\n\n"
+    "- Do NOT use file_read, execute_python, web_search, fetch_url, or ANY other tool.\n"
+    "- You already have all the context you need in the conversation above.\n"
+    "- Tool calls will be REJECTED and will waste your only turn — you will fail the task.\n"
+    "- Your entire response must be plain text: an <analysis> block followed by a <summary> block.\n\n"
+)
+
+_BASE_COMPACT_PROMPT = (
+    "Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.\n"
+    "This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.\n\n"
+    "Before providing your final summary, wrap your analysis in <analysis> tags to organize your thoughts and ensure you've covered all necessary points. In your analysis process:\n\n"
+    "1. Chronologically analyze each message and section of the conversation. For each section thoroughly identify:\n"
+    "   - The user's explicit requests and intents\n"
+    "   - Your approach to addressing the user's requests\n"
+    "   - Key decisions, technical concepts and code patterns\n"
+    "   - Specific details like:\n"
+    "     - file names\n"
+    "     - full code snippets\n"
+    "     - function signatures\n"
+    "     - file edits\n"
+    "   - Errors that you ran into and how you fixed them\n"
+    "   - Pay special attention to specific user feedback that you received, especially if the user told you to do something differently.\n"
+    "2. Double-check for technical accuracy and completeness, addressing each required element thoroughly.\n\n"
+    "Your summary should include the following sections:\n\n"
+    "1. Primary Request and Intent: Capture all of the user's explicit requests and intents in detail\n"
+    "2. Key Technical Concepts: List all important technical concepts, technologies, and frameworks discussed.\n"
+    "3. Files and Code Sections: Enumerate specific files and code sections examined, modified, or created. Pay special attention to the most recent messages and include full code snippets where applicable and include a summary of why this file read or edit is important.\n"
+    "4. Errors and fixes: List all errors that you ran into, and how you fixed them. Pay special attention to specific user feedback that you received, especially if the user told you to do something differently.\n"
+    "5. Problem Solving: Document problems solved and any ongoing troubleshooting efforts.\n"
+    "6. All user messages: List ALL user messages that are not tool results. These are critical for understanding the users' feedback and changing intent.\n"
+    "7. Pending Tasks: Outline any pending tasks that you have explicitly been asked to work on.\n"
+    "8. Current Work: Describe in detail precisely what was being worked on immediately before this summary request, paying special attention to the most recent messages from both user and assistant. Include file names and code snippets where applicable.\n"
+    "9. Optional Next Step: List the next step that you will take that is related to the most recent work you were doing. IMPORTANT: ensure that this step is DIRECTLY in line with the user's most recent explicit requests, and the task you were working on immediately before this summary request. If your last task was concluded, then only list next steps if they are explicitly in line with the users request. Do not start on tangential requests or really old requests that were already completed without confirming with the user first.\n"
+    "                       If there is a next step, include direct quotes from the most recent conversation showing exactly what task you were working on and where you left off. This should be verbatim to ensure there's no drift in task interpretation.\n\n"
+    "Please provide your summary based on the conversation so far, following this structure and ensuring precision and thoroughness in your response.\n\n"
+    "REMINDER: Do NOT call any tools. Respond with plain text only — "
+    "an <analysis> block followed by a <summary> block. "
+    "Tool calls will be rejected and you will fail the task."
+)
+
 # ── Auto-dream scan throttle ────────────────────────────────
 
 _DREAM_SCAN_THROTTLE_SEC = 600
@@ -53,32 +104,38 @@ _DREAM_SCAN_THROTTLE_SEC = 600
 
 _SESSION_MEMORY_TEMPLATE = """\
 # Session Title
-*A brief title describing the current task or session.*
+_A short and distinctive 5-10 word descriptive title for the session. Super info dense, no filler_
 
 # Current State
-*What is the current status of the work?*
+_What is actively being worked on right now? Pending tasks not yet completed. Immediate next steps._
 
-# Task Specification
-*What was requested and what are the acceptance criteria?*
+# Task specification
+_What did the user ask to build? Any design decisions or other explanatory context_
 
 # Files and Functions
-*Key files and functions being worked on.*
+_What are the important files? In short, what do they contain and why are they relevant?_
 
 # Workflow
-*Steps taken so far and next steps planned.*
+_What bash commands are usually run and in what order? How to interpret their output if not obvious?_
 
 # Errors & Corrections
-*Errors encountered and how they were fixed.*
+_Errors encountered and how they were fixed. What did the user correct? What approaches failed and should not be tried again?_
+
+# Codebase and System Documentation
+_What are the important system components? How do they work/fit together?_
 
 # Learnings
-*Non-obvious things learned during this session.*
+_What has worked well? What has not? What to avoid? Do not duplicate items from other sections_
 
-# Key Results
-*Concrete outputs or deliverables produced.*
+# Key results
+_If the user asked a specific output such as an answer to a question, a table, or other document, repeat the exact result here_
 
 # Worklog
-*Chronological record of major actions taken.*
+_Step by step, what was attempted, done? Very terse summary for each step_
 """
+
+_MAX_SECTION_LENGTH = 2000
+_MAX_TOTAL_SESSION_MEMORY_TOKENS = 12000
 
 
 def _compact_threshold() -> int:
@@ -199,15 +256,39 @@ class ClaudeLikeMemoryRuntime:
             self._mark_session_memory_extracted(session_id, final_messages)
         self._maybe_launch_auto_dream(client, session_id=session_id, scope_id=scope_id)
 
-    # ── compaction (4a) ──────────────────────────────────────
+    # ── compaction (4a) — session-memory-first, then full LLM compact ──
+
+    _consecutive_compact_failures: int = 0
 
     def _compact_if_needed(self, messages: list[dict[str, Any]], session_id: str) -> list[dict[str, Any]]:
         total_tokens = self._estimate_message_tokens(messages)
         if total_tokens < _compact_threshold():
             return messages
+
+        # Strategy 1: session-memory compact (cheap, no LLM call)
         session_mem = read_session_memory(session_id).strip()
-        if not session_mem:
+        if session_mem:
+            result = self._session_memory_compact(messages, session_mem)
+            if result is not None:
+                _log.debug("compact_if_needed: session-memory compact %d -> %d messages", len(messages), len(result))
+                return result
+
+        # Strategy 2: full 9-section LLM compact
+        if self._consecutive_compact_failures >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES:
+            _log.warning("compact_if_needed: circuit breaker open (%d consecutive failures)", self._consecutive_compact_failures)
             return messages
+
+        result = self._full_compact(messages, session_id)
+        if result is not None:
+            self._consecutive_compact_failures = 0
+            return result
+        else:
+            self._consecutive_compact_failures += 1
+            _log.warning("compact_if_needed: full compact failed (failures=%d)", self._consecutive_compact_failures)
+            return messages
+
+    def _session_memory_compact(self, messages: list[dict[str, Any]], session_mem: str) -> list[dict[str, Any]] | None:
+        """Cheap compaction using existing session memory as summary (no LLM call)."""
         kept_tokens = 0
         text_msgs = 0
         cut_index = len(messages)
@@ -219,19 +300,88 @@ class ClaudeLikeMemoryRuntime:
             if kept_tokens >= _COMPACT_MIN_KEEP_TOKENS and text_msgs >= _COMPACT_MIN_KEEP_TEXT_MSGS:
                 cut_index = i
                 break
-        if cut_index <= 1:
-            return messages
-        if cut_index < 4:
-            return messages
+        if cut_index <= 1 or cut_index < 4:
+            return None
         compacted: list[dict[str, Any]] = []
         for msg in messages[:cut_index]:
             if msg.get("role") == "system":
                 compacted.append(msg)
-        compacted.append({"role": "user", "content": f"[Session context was compacted. Previous conversation summary:]\n\n{session_mem}"})
-        compacted.append({"role": "assistant", "content": "Understood. I have the session context summary. Continuing from where we left off."})
+        compacted.append({
+            "role": "user",
+            "content": (
+                "This session is being continued from a previous conversation that ran out of context. "
+                "The summary below covers the earlier portion of the conversation.\n\n"
+                f"Summary:\n{session_mem}"
+            ),
+        })
+        compacted.append({
+            "role": "assistant",
+            "content": "Understood. I have the session context summary. Continuing from where we left off.",
+        })
         compacted.extend(messages[cut_index:])
-        _log.debug("compact_if_needed: %d -> %d messages, cut at %d", len(messages), len(compacted), cut_index)
         return compacted
+
+    def _full_compact(self, messages: list[dict[str, Any]], session_id: str) -> list[dict[str, Any]] | None:
+        """Full 9-section LLM compact matching Claude Code's BASE_COMPACT_PROMPT."""
+        from .storage import session_transcript_path
+        snap = self.forks.get_snapshot(session_id)
+        if snap is None:
+            return None
+        try:
+            from certified_turtles.services.llm import LLMService
+            svc = LLMService.from_env()
+            client_ref = svc.client
+        except Exception:
+            return None
+        compact_messages = [dict(m) for m in messages]
+        compact_messages.append({
+            "role": "user",
+            "content": _NO_TOOLS_PREAMBLE + _BASE_COMPACT_PROMPT,
+        })
+        try:
+            raw = client_ref.chat_completions(
+                snap.model,
+                compact_messages,
+                temperature=0.0,
+                max_tokens=8192,
+            )
+            content = (((raw.get("choices") or [{}])[0].get("message") or {}).get("content")) or ""
+        except Exception:
+            _log.exception("full_compact: LLM call failed")
+            return None
+        if not content.strip():
+            return None
+        summary = self._format_compact_summary(content)
+        transcript_path = str(session_transcript_path(session_id))
+        user_msg = (
+            "This session is being continued from a previous conversation that ran out of context. "
+            "The summary below covers the earlier portion of the conversation.\n\n"
+            f"{summary}\n\n"
+            f"If you need specific details from before compaction (like exact code snippets, error messages, or content you generated), "
+            f"read the full transcript at: {transcript_path}\n\n"
+            "Please continue the conversation from where we left off without asking the user any further questions. "
+            "Continue with the last task that you were asked to work on."
+        )
+        compacted: list[dict[str, Any]] = []
+        for msg in messages:
+            if msg.get("role") == "system":
+                compacted.append(msg)
+        compacted.append({"role": "user", "content": user_msg})
+        compacted.append({"role": "assistant", "content": "Understood. Continuing from where we left off."})
+        _log.debug("full_compact: %d -> %d messages", len(messages), len(compacted))
+        return compacted
+
+    @staticmethod
+    def _format_compact_summary(raw: str) -> str:
+        """Strip <analysis> scratchpad and extract <summary> matching Claude Code's formatCompactSummary."""
+        import re
+        result = re.sub(r"<analysis>[\s\S]*?</analysis>", "", raw)
+        match = re.search(r"<summary>([\s\S]*?)</summary>", result)
+        if match:
+            content = match.group(1).strip()
+            result = re.sub(r"<summary>[\s\S]*?</summary>", f"Summary:\n{content}", result)
+        result = re.sub(r"\n\n+", "\n\n", result)
+        return result.strip()
 
     # ── microcompact (4f) ────────────────────────────────────
 
@@ -402,40 +552,140 @@ class ClaudeLikeMemoryRuntime:
 
     def _extractor_prompt(self, scope_id: str, messages: list[dict[str, Any]]) -> str:
         window = _extract_window_size()
-        preview = []
-        for item in messages[-window:]:
-            role = item.get("role", "unknown")
-            content = message_text_content(item)
-            if content.strip():
-                preview.append(f"<<{role}>>\n{content}")
-        body = "\n\n".join(preview)
+        mem_root = memory_dir(scope_id)
         headers = scan_memory_headers(scope_id)
-        manifest = format_memory_manifest(headers) if headers else "(no memory files yet)"
+        manifest = format_memory_manifest(headers) if headers else ""
+
+        manifest_section = ""
+        if manifest:
+            manifest_section = (
+                "\n\n## Existing memory files\n\n"
+                f"{manifest}\n\n"
+                "Check this list before writing — update an existing file rather than creating a duplicate."
+            )
+
+        how_to_save = "\n".join(
+            (
+                "## How to save memories",
+                "",
+                "Saving a memory is a two-step process:",
+                "",
+                "**Step 1** — write the memory to its own file (e.g., `user_role.md`, `feedback_testing.md`) using this frontmatter format:",
+                "",
+                *MEMORY_FRONTMATTER_EXAMPLE,
+                "",
+                "**Step 2** — add a pointer to that file in `MEMORY.md`. `MEMORY.md` is an index, not a memory — each entry should be one line, under ~150 characters: `- [Title](file.md) — one-line hook`. It has no frontmatter. Never write memory content directly into `MEMORY.md`.",
+                "",
+                "- `MEMORY.md` is always loaded into your conversation context — lines after 200 will be truncated, so keep the index concise",
+                "- Organize memory semantically by topic, not chronologically",
+                "- Update or remove memories that turn out to be wrong or outdated",
+                "- Do not write duplicate memories. First check if there is an existing memory you can update before writing a new one.",
+            )
+        )
+
+        types_text = "\n".join(TYPES_SECTION)
+        what_not_text = "\n".join(WHAT_NOT_TO_SAVE_SECTION)
+
         return (
-            f"Extract memories from the conversation below. Memory directory: `{memory_dir(scope_id)}`\n\n"
-            "## Existing memory files\n\n"
-            f"{manifest}\n\n"
-            "## Recent conversation\n\n"
-            f"{body}"
+            f"Analyze the most recent ~{window} messages above and use them to update your persistent memory systems.\n\n"
+            f"You MUST only use content from the last ~{window} messages to update your persistent memories. "
+            "Do not waste any turns attempting to investigate or verify that content further — "
+            f"no grepping source files, no reading code to confirm a pattern exists."
+            f"{manifest_section}\n\n"
+            "If the user explicitly asks you to remember something, save it immediately as whichever type fits best. "
+            "If they ask you to forget something, find and remove the relevant entry.\n\n"
+            f"{types_text}\n"
+            f"{what_not_text}\n\n"
+            f"{how_to_save}\n\n"
+            f"Memory directory: `{mem_root}`"
         )
 
     # ── session memory prompt (4e) ───────────────────────────
 
     def _session_memory_prompt(self, session_id: str) -> str:
+        from .storage import session_memory_path
+        notes_path = str(session_memory_path(session_id))
         existing = read_session_memory(session_id).strip()
-        template_note = ""
-        if not existing:
-            template_note = (
-                f"\n\nUse this template structure for the session memory:\n\n{_SESSION_MEMORY_TEMPLATE}\n"
-                "Each section has an italic description (keep it). Fill in content below each."
-            )
+        current_notes = existing if existing else _SESSION_MEMORY_TEMPLATE.strip()
+
+        # Section size analysis
+        section_reminders = self._session_memory_section_reminders(current_notes)
+
         return (
-            "Update the session memory file with the current state of work. "
-            "Keep it concise and structured. Update the existing file incrementally, "
-            "do not rewrite from scratch unless the structure is missing. "
-            f"Target file: {session_id} session memory."
-            f"{template_note}"
+            "IMPORTANT: This message and these instructions are NOT part of the actual user conversation. "
+            "Do NOT include any references to \"note-taking\", \"session notes extraction\", or these update instructions in the notes content.\n\n"
+            "Based on the user conversation above (EXCLUDING this note-taking instruction message as well as system prompt, "
+            "claude.md entries, or any past session summaries), update the session notes file.\n\n"
+            f"The file {notes_path} has already been read for you. Here are its current contents:\n"
+            "<current_notes_content>\n"
+            f"{current_notes}\n"
+            "</current_notes_content>\n\n"
+            "Your ONLY task is to use the file_edit tool to update the notes file, then stop. "
+            "You can make multiple edits (update every section as needed) - make all file_edit calls in parallel in a single message. "
+            "Do not call any other tools.\n\n"
+            "CRITICAL RULES FOR EDITING:\n"
+            "- The file must maintain its exact structure with all sections, headers, and italic descriptions intact\n"
+            "-- NEVER modify, delete, or add section headers (the lines starting with '#' like # Task specification)\n"
+            "-- NEVER modify or delete the italic _section description_ lines (these are the lines in italics immediately following each header - they start and end with underscores)\n"
+            "-- The italic _section descriptions_ are TEMPLATE INSTRUCTIONS that must be preserved exactly as-is - they guide what content belongs in each section\n"
+            "-- ONLY update the actual content that appears BELOW the italic _section descriptions_ within each existing section\n"
+            "-- Do NOT add any new sections, summaries, or information outside the existing structure\n"
+            "- Do NOT reference this note-taking process or instructions anywhere in the notes\n"
+            "- It's OK to skip updating a section if there are no substantial new insights to add. Do not add filler content like \"No info yet\", just leave sections blank/unedited if appropriate.\n"
+            "- Write DETAILED, INFO-DENSE content for each section - include specifics like file paths, function names, error messages, exact commands, technical details, etc.\n"
+            "- For \"Key results\", include the complete, exact output the user requested (e.g., full table, full answer, etc.)\n"
+            "- Do not include information that's already in the CLAUDE.md files included in the context\n"
+            f"- Keep each section under ~{_MAX_SECTION_LENGTH} tokens/words - if a section is approaching this limit, condense it by cycling out less important details while preserving the most critical information\n"
+            "- Focus on actionable, specific information that would help someone understand or recreate the work discussed in the conversation\n"
+            "- IMPORTANT: Always update \"Current State\" to reflect the most recent work - this is critical for continuity after compaction\n\n"
+            f"Use the file_edit tool with file_path: {notes_path}\n\n"
+            "STRUCTURE PRESERVATION REMINDER:\n"
+            "Each section has TWO parts that must be preserved exactly as they appear in the current file:\n"
+            "1. The section header (line starting with #)\n"
+            "2. The italic description line (the _italicized text_ immediately after the header - this is a template instruction)\n\n"
+            "You ONLY update the actual content that comes AFTER these two preserved lines. The italic description lines starting and ending with underscores are part of the template structure, NOT content to be edited or removed.\n\n"
+            "REMEMBER: Use the file_edit tool in parallel and stop. Do not continue after the edits. Only include insights from the actual user conversation, never from these note-taking instructions. Do not delete or change section headers or italic _section descriptions_."
+            f"{section_reminders}"
         )
+
+    def _session_memory_section_reminders(self, content: str) -> str:
+        """Generate budget warnings for oversized session memory sections."""
+        sections: dict[str, int] = {}
+        current_section = ""
+        current_lines: list[str] = []
+        for line in content.split("\n"):
+            if line.startswith("# "):
+                if current_section and current_lines:
+                    text = "\n".join(current_lines).strip()
+                    sections[current_section] = max(1, len(text.encode("utf-8", errors="replace")) // 4)
+                current_section = line
+                current_lines = []
+            else:
+                current_lines.append(line)
+        if current_section and current_lines:
+            text = "\n".join(current_lines).strip()
+            sections[current_section] = max(1, len(text.encode("utf-8", errors="replace")) // 4)
+
+        total_tokens = max(1, len(content.encode("utf-8", errors="replace")) // 4)
+        over_budget = total_tokens > _MAX_TOTAL_SESSION_MEMORY_TOKENS
+        oversized = [(s, t) for s, t in sorted(sections.items(), key=lambda x: -x[1]) if t > _MAX_SECTION_LENGTH]
+
+        if not oversized and not over_budget:
+            return ""
+
+        parts: list[str] = []
+        if over_budget:
+            parts.append(
+                f"\n\nCRITICAL: The session memory file is currently ~{total_tokens} tokens, which exceeds the maximum of "
+                f"{_MAX_TOTAL_SESSION_MEMORY_TOKENS} tokens. You MUST condense the file to fit within this budget. "
+                "Aggressively shorten oversized sections by removing less important details, merging related items, and summarizing older entries. "
+                'Prioritize keeping "Current State" and "Errors & Corrections" accurate and detailed.'
+            )
+        if oversized:
+            lines = [f'- "{s}" is ~{t} tokens (limit: {_MAX_SECTION_LENGTH})' for s, t in oversized]
+            header = "Oversized sections to condense" if over_budget else "IMPORTANT: The following sections exceed the per-section limit and MUST be condensed"
+            parts.append(f"\n\n{header}:\n" + "\n".join(lines))
+        return "".join(parts)
 
     # ── auto-dream (4b throttle) ─────────────────────────────
 

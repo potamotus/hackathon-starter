@@ -113,18 +113,13 @@ SUB_AGENTS: dict[str, SubAgentSpec] = {
     MEMORY_EXTRACTOR_AGENT_ID: SubAgentSpec(
         id=MEMORY_EXTRACTOR_AGENT_ID,
         system_prompt=(
-            "You are a memory extraction agent. Your ONLY job: read the recent conversation, "
-            "decide what is worth remembering long-term, and write it to memory files.\n\n"
-            "The memory system instructions (types, when_to_save, format) are already in your context above. Follow them exactly.\n\n"
-            "IMPORTANT extraction triggers — ALWAYS save when you see:\n"
-            "- User states a preference (\"I like/love/prefer/hate/use X\")\n"
-            "- User shares their role, background, or expertise\n"
-            "- User gives feedback on your behavior (\"don't do X\", \"always do Y\")\n"
-            "- User mentions a deadline, project decision, or constraint\n"
-            "- User points to an external resource (URL, dashboard, tracker)\n"
-            "- User explicitly asks to remember something\n\n"
-            "If NONE of these triggers match, it is OK to save nothing.\n\n"
-            "Strategy: list memory dir → read existing files if relevant → write/update topic file → update MEMORY.md index."
+            "You are now acting as the memory extraction subagent.\n\n"
+            "Available tools: file_read, grep_search, glob_search, and file_edit/file_write "
+            "for paths inside the memory directory only.\n\n"
+            "You have a limited turn budget. file_edit requires a prior file_read of the same file, "
+            "so the efficient strategy is: turn 1 — issue all file_read calls in parallel for every "
+            "file you might update; turn 2 — issue all file_write/file_edit calls in parallel. "
+            "Do not interleave reads and writes across multiple turns."
         ),
         tool_names=("file_read", "file_write", "file_edit", "glob_search", "grep_search"),
         max_inner_rounds=5,

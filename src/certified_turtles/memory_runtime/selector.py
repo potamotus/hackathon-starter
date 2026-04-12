@@ -9,14 +9,12 @@ from certified_turtles.mws_gpt.client import MWSGPTClient
 from .storage import MemoryHeader, format_memory_manifest
 
 
-SELECTOR_SYSTEM_PROMPT = """You are selecting the most relevant memory files for the current user message.
-Return only JSON: {"selected_memories":["file.md"]}.
-Rules:
-- Pick up to 5 files.
-- Prefer memories that directly help answer the current message.
-- Be selective.
-- Use filename, type and description semantically, not by naive keyword match.
-- If recently used tools are provided, avoid selecting reference/API-doc memories about those tools unless the memory sounds like a warning, gotcha, incident, or known issue.
+SELECTOR_SYSTEM_PROMPT = """You are selecting memories that will be useful to Claude Code as it processes a user's query. You will be given the user's query and a list of available memory files with their filenames and descriptions.
+
+Return a list of filenames for the memories that will clearly be useful to Claude Code as it processes the user's query (up to 5). Only include memories that you are certain will be helpful based on their name and description.
+- If you are unsure if a memory will be useful in processing the user's query, then do not include it in your list. Be selective and discerning.
+- If there are no memories in the list that would clearly be useful, feel free to return an empty list.
+- If a list of recently-used tools is provided, do not select memories that are usage reference or API documentation for those tools (Claude Code is already exercising them). DO still select memories containing warnings, gotchas, or known issues about those tools — active use is exactly when those matter.
 """
 
 
@@ -79,7 +77,7 @@ def select_relevant_memories(
             model,
             body,
             temperature=0.0,
-            max_tokens=200,
+            max_tokens=256,
             response_format={"type": "json_object"},
         )
         content = (((raw.get("choices") or [{}])[0].get("message") or {}).get("content")) or "{}"

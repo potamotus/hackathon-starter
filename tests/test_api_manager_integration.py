@@ -113,7 +113,7 @@ class TestPrepareMessages:
             mock_client, model="m", messages=messages, session_id="s1", scope_id="sc1",
         )
         assert result[0]["role"] == "system"
-        assert "# memory" in result[0]["content"]
+        assert "# auto memory" in result[0]["content"]
 
     def test_original_messages_preserved(self, runtime, mock_client):
         """User messages still present after prepare_messages."""

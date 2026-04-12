@@ -13,6 +13,8 @@ from .memory_types import memory_instructions
 from .selector import select_relevant_memories
 from .static_instructions import ConditionalRule, load_conditional_rules, load_static_instruction_prompt
 from .storage import (
+    MAX_MEMORY_INDEX_BYTES,
+    MAX_MEMORY_INDEX_LINES,
     MAX_MEMORY_SESSION_BYTES,
     MAX_RELEVANT_MEMORIES,
     memory_dir,
@@ -25,6 +27,43 @@ from .storage import (
     session_meta_path,
     write_json,
 )
+
+
+def _truncate_entrypoint_content(raw: str) -> str:
+    """Truncate MEMORY.md content to line and byte caps, appending a warning.
+
+    Matches Claude Code's truncateEntrypointContent() from memdir.ts.
+    """
+    trimmed = raw.strip()
+    lines = trimmed.split("\n")
+    line_count = len(lines)
+    byte_count = len(trimmed.encode("utf-8", errors="replace"))
+
+    was_line_truncated = line_count > MAX_MEMORY_INDEX_LINES
+    was_byte_truncated = byte_count > MAX_MEMORY_INDEX_BYTES
+
+    if not was_line_truncated and not was_byte_truncated:
+        return trimmed
+
+    truncated = "\n".join(lines[:MAX_MEMORY_INDEX_LINES]) if was_line_truncated else trimmed
+
+    encoded = truncated.encode("utf-8", errors="replace")
+    if len(encoded) > MAX_MEMORY_INDEX_BYTES:
+        cut = truncated.rfind("\n", 0, MAX_MEMORY_INDEX_BYTES)
+        truncated = truncated[: cut if cut > 0 else MAX_MEMORY_INDEX_BYTES]
+
+    if was_byte_truncated and not was_line_truncated:
+        reason = f"{byte_count} bytes (limit: {MAX_MEMORY_INDEX_BYTES}) — index entries are too long"
+    elif was_line_truncated and not was_byte_truncated:
+        reason = f"{line_count} lines (limit: {MAX_MEMORY_INDEX_LINES})"
+    else:
+        reason = f"{line_count} lines and {byte_count} bytes"
+
+    return (
+        truncated
+        + f"\n\n> WARNING: MEMORY.md is {reason}. Only part of it was loaded. "
+        "Keep index entries to one line under ~200 chars; move detail into topic files."
+    )
 
 
 def _memory_age_warning(updated: str) -> str:
@@ -121,11 +160,15 @@ def build_memory_prompt(
         active_paths = _extract_file_paths_from_messages(messages)
         for rule in _match_conditional_rules(conditional_rules, active_paths):
             parts.append(f"## Conditional Rule: {rule.path.name}\n{rule.content}")
-    parts.extend([memory_instructions(include_index_rules=True), "", "# memory", f"Memory directory: {mem_root}"])
+    parts.append(memory_instructions(str(mem_root), include_index_rules=True))
 
     index_path = memory_index_path(scope_id)
     if index_path.is_file():
-        parts.extend(["", "## MEMORY.md", index_path.read_text(encoding='utf-8', errors='replace').strip()])
+        raw_index = index_path.read_text(encoding='utf-8', errors='replace').strip()
+        index_content = _truncate_entrypoint_content(raw_index)
+        parts.extend(["", "## MEMORY.md", "", index_content])
+    else:
+        parts.extend(["", "## MEMORY.md", "", "Your MEMORY.md is currently empty. When you save new memories, they will appear here."])
 
     headers = scan_memory_headers(scope_id)
     selected: list[str] = []
