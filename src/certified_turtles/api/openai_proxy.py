@@ -455,6 +455,10 @@ def _agent_sse_stream(
     *,
     max_tool_rounds: int,
     extra: dict[str, Any],
+    runtime: Any = None,
+    session_id: str = "",
+    scope_id: str = "",
+    prepared_messages: list[dict[str, Any]] | None = None,
 ):
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
@@ -466,6 +470,7 @@ def _agent_sse_stream(
             if etype == "done":
                 result = event.get("result") if isinstance(event.get("result"), dict) else {}
                 final_output = result.get("output") if isinstance(result.get("output"), list) else cumulative_output
+                final_messages = result.get("messages") or (prepared_messages or messages)
                 yield _sse_line(
                     model,
                     cid,
@@ -475,6 +480,15 @@ def _agent_sse_stream(
                     extra={"done": True, "output": final_output},
                 )
                 yield "data: [DONE]\n\n"
+                if runtime and session_id:
+                    runtime.after_response(
+                        svc.client,
+                        model=model,
+                        prepared_messages=prepared_messages or messages,
+                        final_messages=final_messages,
+                        session_id=session_id,
+                        scope_id=scope_id,
+                    )
                 return
             if etype == "reasoning_stream":
                 text = str(event.get("text") or "")
@@ -771,6 +785,10 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
                 messages,
                 max_tool_rounds=max_tool_rounds,
                 extra=extra,
+                runtime=runtime,
+                session_id=session_id,
+                scope_id=scope_id,
+                prepared_messages=prepared_messages,
             ),
             media_type="text/event-stream",
         )
