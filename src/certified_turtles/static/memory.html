@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Память — GPTHub</title>
+<style>
+  :root {
+    --bg: #1a1a1a;
+    --bg-card: #242424;
+    --bg-card-hover: #2a2a2a;
+    --bg-modal: #1e1e1e;
+    --border: #333;
+    --text: #e5e5e5;
+    --text-muted: #999;
+    --text-dim: #666;
+    --accent: #5b8def;
+    --accent-hover: #4a7de0;
+    --danger: #e55;
+    --danger-hover: #d44;
+    --tag-auto: #e5a73b;
+    --tag-user: #5b8def;
+    --toast-bg: #2d3748;
+    --radius: 10px;
+    --radius-sm: 6px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .container { max-width: 800px; margin: 0 auto; padding: 40px 24px; }
+  h1 { font-size: 28px; font-weight: 600; margin-bottom: 8px; }
+  .subtitle { color: var(--text-muted); font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+
+  /* Tabs */
+  .tabs {
+    display: flex; gap: 0; margin-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab-btn {
+    padding: 10px 20px; border: none; background: transparent;
+    color: var(--text-muted); font-size: 14px; font-weight: 500;
+    cursor: pointer; border-bottom: 2px solid transparent;
+    transition: all 0.15s; position: relative; bottom: -1px;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-count {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 20px; height: 18px; padding: 0 5px;
+    border-radius: 9px; font-size: 11px; font-weight: 600;
+    background: var(--bg-card); color: var(--text-muted); margin-left: 6px;
+  }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* Add button */
+  .add-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 16px; border-radius: var(--radius-sm);
+    border: 1px dashed var(--border); background: transparent;
+    color: var(--text-muted); font-size: 13px; cursor: pointer;
+    transition: all 0.15s; margin-bottom: 16px;
+  }
+  .add-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .memory-list { display: flex; flex-direction: column; gap: 1px; }
+  .memory-card {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 16px 18px;
+    background: var(--bg-card);
+    cursor: pointer;
+    transition: background 0.12s;
+    border-left: 3px solid var(--accent);
+  }
+  .memory-card:first-child { border-radius: var(--radius) var(--radius) 0 0; }
+  .memory-card:last-child { border-radius: 0 0 var(--radius) var(--radius); }
+  .memory-card:only-child { border-radius: var(--radius); }
+  .memory-card:hover { background: var(--bg-card-hover); }
+  .memory-info { flex: 1; min-width: 0; }
+  .memory-name {
+    font-size: 14px; font-weight: 500; margin-bottom: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .memory-desc {
+    font-size: 13px; color: var(--text-muted); line-height: 1.4;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .memory-meta {
+    display: flex; align-items: center; gap: 8px;
+    flex-shrink: 0; margin-top: 2px;
+  }
+  .source-badge {
+    font-size: 11px; font-weight: 500; padding: 2px 8px;
+    border-radius: 4px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .source-badge.auto { background: rgba(229,167,59,.15); color: var(--tag-auto); }
+  .source-badge.user { background: rgba(91,141,239,.15); color: var(--tag-user); }
+  .memory-date { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+
+  .empty-state {
+    text-align: center; padding: 60px 20px; color: var(--text-muted);
+  }
+  .empty-state svg { width: 48px; height: 48px; margin-bottom: 16px; opacity: 0.4; }
+  .empty-state p { font-size: 14px; }
+
+  /* Modal */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+    z-index: 100; align-items: center; justify-content: center;
+  }
+  .modal-overlay.visible { display: flex; }
+  .modal {
+    background: var(--bg-modal); border: 1px solid var(--border);
+    border-radius: 14px; width: 90%; max-width: 620px;
+    max-height: 85vh; overflow: hidden;
+    display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .modal-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 24px 16px; border-bottom: 1px solid var(--border);
+  }
+  .modal-header h2 { font-size: 18px; font-weight: 600; }
+  .modal-close {
+    width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border);
+    background: transparent; color: var(--text-muted); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; transition: all 0.12s;
+  }
+  .modal-close:hover { background: var(--bg-card); color: var(--text); }
+  .modal-body {
+    padding: 20px 24px; overflow-y: auto; flex: 1;
+  }
+  .modal-body label {
+    display: block; font-size: 12px; font-weight: 500;
+    color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .modal-body input, .modal-body textarea, .modal-body select {
+    width: 100%; padding: 10px 12px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--bg);
+    color: var(--text); font-size: 14px; font-family: inherit;
+    outline: none; transition: border-color 0.15s;
+  }
+  .modal-body input:focus, .modal-body textarea:focus, .modal-body select:focus {
+    border-color: var(--accent);
+  }
+  .modal-body textarea { min-height: 140px; resize: vertical; line-height: 1.5; }
+  .field-group { margin-bottom: 16px; }
+  .field-row { display: flex; gap: 12px; }
+  .field-row .field-group { flex: 1; }
+  .modal-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 24px; border-top: 1px solid var(--border);
+  }
+  .btn {
+    padding: 8px 18px; border-radius: var(--radius-sm); border: none;
+    font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.12s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+  .btn-danger:hover { background: var(--danger); color: #fff; }
+  .btn-ghost { background: transparent; color: var(--text-muted); }
+  .btn-ghost:hover { color: var(--text); }
+
+  /* Toast */
+  .toast-container {
+    position: fixed; bottom: 24px; right: 24px; z-index: 200;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .toast {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px; border-radius: 8px;
+    background: var(--toast-bg); border: 1px solid var(--border);
+    font-size: 13px; color: var(--text);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    animation: toast-in 0.3s ease-out;
+    max-width: 320px;
+  }
+  .toast.fade-out { animation: toast-out 0.3s ease-in forwards; }
+  .toast-icon { font-size: 16px; flex-shrink: 0; }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes toast-out { from { opacity: 1; } to { opacity: 0; transform: translateY(-5px); } }
+
+  @media (max-width: 600px) {
+    .container { padding: 24px 16px; }
+    h1 { font-size: 22px; }
+    .field-row { flex-direction: column; gap: 0; }
+    .modal { width: 95%; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Память и Инструкции</h1>
+  <p class="subtitle">Память хранит факты о вас. Инструкции задают правила поведения ассистента.</p>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="memory">Память <span class="tab-count" id="memory-count">0</span></button>
+    <button class="tab-btn" data-tab="instructions">Инструкции <span class="tab-count" id="instr-count">0</span></button>
+  </div>
+
+  <!-- Memory tab -->
+  <div class="tab-panel active" id="panel-memory">
+    <div id="memory-list" class="memory-list"></div>
+  </div>
+
+  <!-- Instructions tab -->
+  <div class="tab-panel" id="panel-instructions">
+    <button class="add-btn" onclick="openNewInstruction()">+ Добавить инструкцию</button>
+    <div id="instr-list" class="memory-list"></div>
+  </div>
+</div>
+
+<!-- Memory Modal -->
+<div class="modal-overlay" id="mem-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="mem-modal-title">Память</h2>
+      <button class="modal-close" onclick="closeMemModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-group">
+        <label>Содержание</label>
+        <textarea id="mem-edit-body" placeholder="Текст записи"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="mem-btn-delete" onclick="deleteMemory()">Удалить</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeMemModal()">Отмена</button>
+        <button class="btn btn-primary" onclick="saveMemory()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Instruction Modal -->
+<div class="modal-overlay" id="instr-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="instr-modal-title">Инструкция</h2>
+      <button class="modal-close" onclick="closeInstrModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-group">
+        <label>Описание</label>
+        <input type="text" id="instr-edit-desc" placeholder="Краткое описание правила">
+      </div>
+      <div class="field-group">
+        <label>Правило</label>
+        <textarea id="instr-edit-body" placeholder="Текст инструкции"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="instr-btn-delete" onclick="deleteInstruction()">Удалить</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeInstrModal()">Отмена</button>
+        <button class="btn btn-primary" id="instr-btn-save" onclick="saveInstruction()">Сохранить</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+const API = '/api/v1';
+const SCOPE = new URLSearchParams(location.search).get('scope_id') || 'default-scope';
+let memories = [];
+let instructions = [];
+let editingMemFilename = null;
+let editingInstrFilename = null;
+let editingInstrSource = null;
+
+const SOURCE_LABELS = { auto: 'Авто', user: 'Ручная' };
+
+// Tab switching
+document.querySelector('.tabs').addEventListener('click', e => {
+  const btn = e.target.closest('.tab-btn');
+  if (!btn) return;
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+});
+
+// ── Memory ──
+
+async function loadMemories() {
+  try {
+    const r = await fetch(`${API}/memory?scope_id=${encodeURIComponent(SCOPE)}`);
+    const data = await r.json();
+    memories = data.memories || [];
+    renderMemories();
+  } catch (e) { console.error('Failed to load memories', e); }
+}
+
+function renderMemories() {
+  document.getElementById('memory-count').textContent = memories.length;
+  const list = document.getElementById('memory-list');
+  if (!memories.length) {
+    list.innerHTML = `<div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2a7 7 0 017 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 01-2 2h-4a2 2 0 01-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 017-7z"/><path d="M10 21h4"/></svg>
+      <p>Пока нет воспоминаний</p>
+    </div>`;
+    return;
+  }
+  list.innerHTML = memories.map(m => {
+    const ago = timeAgo(new Date(m.mtime * 1000));
+    return `<div class="memory-card" onclick="openMemory('${esc(m.filename)}')">
+      <div class="memory-info">
+        <div class="memory-name">${esc(m.name)}</div>
+        <div class="memory-desc">${esc(m.description)}</div>
+      </div>
+      <div class="memory-meta">
+        <span class="memory-date">${ago}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function openMemory(filename) {
+  editingMemFilename = filename;
+  try {
+    const r = await fetch(`${API}/memory/${encodeURIComponent(filename)}?scope_id=${encodeURIComponent(SCOPE)}`);
+    const data = await r.json();
+    document.getElementById('mem-edit-body').value = data.body || '';
+    document.getElementById('mem-modal-title').textContent = data.name || 'Память';
+    document.getElementById('mem-modal').classList.add('visible');
+  } catch (e) { showToast('Ошибка загрузки', 'error'); }
+}
+
+function closeMemModal() {
+  document.getElementById('mem-modal').classList.remove('visible');
+  editingMemFilename = null;
+}
+
+async function saveMemory() {
+  if (!editingMemFilename) return;
+  const mem = memories.find(m => m.filename === editingMemFilename);
+  if (!mem) return;
+  const body = document.getElementById('mem-edit-body').value.trim();
+  if (!body) { showToast('Заполните содержание', 'error'); return; }
+  try {
+    const r = await fetch(`${API}/memory/${encodeURIComponent(editingMemFilename)}?scope_id=${encodeURIComponent(SCOPE)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: mem.name, description: body.slice(0, 200), type: mem.type, body }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    closeMemModal(); showToast('Память обновлена'); loadMemories();
+  } catch (e) { showToast('Ошибка сохранения', 'error'); }
+}
+
+async function deleteMemory() {
+  if (!editingMemFilename || !confirm('Удалить эту запись?')) return;
+  try {
+    const r = await fetch(`${API}/memory/${encodeURIComponent(editingMemFilename)}?scope_id=${encodeURIComponent(SCOPE)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(await r.text());
+    closeMemModal(); showToast('Запись удалена'); loadMemories();
+  } catch (e) { showToast('Ошибка удаления', 'error'); }
+}
+
+// ── Instructions ──
+
+async function loadInstructions() {
+  try {
+    const r = await fetch(`${API}/instructions?scope_id=${encodeURIComponent(SCOPE)}`);
+    const data = await r.json();
+    instructions = data.instructions || [];
+    renderInstructions();
+  } catch (e) { console.error('Failed to load instructions', e); }
+}
+
+function renderInstructions() {
+  document.getElementById('instr-count').textContent = instructions.length;
+  const list = document.getElementById('instr-list');
+  if (!instructions.length) {
+    list.innerHTML = `<div class="empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><path d="M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+      <p>Пока нет инструкций</p>
+    </div>`;
+    return;
+  }
+  list.innerHTML = instructions.map(i => {
+    const ago = timeAgo(new Date(i.mtime * 1000));
+    return `<div class="memory-card" onclick="openInstruction('${esc(i.filename)}')">
+      <div class="memory-info">
+        <div class="memory-name">${esc(i.name)}</div>
+        <div class="memory-desc">${esc(i.description)}</div>
+      </div>
+      <div class="memory-meta">
+        <span class="source-badge ${i.source}">${SOURCE_LABELS[i.source] || i.source}</span>
+        <span class="memory-date">${ago}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openNewInstruction() {
+  editingInstrFilename = null;
+  editingInstrSource = 'user';
+  document.getElementById('instr-modal-title').textContent = 'Новая инструкция';
+  document.getElementById('instr-edit-desc').value = '';
+  document.getElementById('instr-edit-body').value = '';
+  document.getElementById('instr-edit-desc').disabled = false;
+  document.getElementById('instr-edit-body').disabled = false;
+  document.getElementById('instr-btn-save').style.display = '';
+  document.getElementById('instr-btn-delete').style.display = 'none';
+  document.getElementById('instr-modal').classList.add('visible');
+}
+
+async function openInstruction(filename) {
+  const instr = instructions.find(i => i.filename === filename);
+  if (!instr) return;
+  editingInstrFilename = filename;
+  editingInstrSource = instr.source;
+  document.getElementById('instr-modal-title').textContent = instr.name || 'Инструкция';
+  document.getElementById('instr-edit-desc').value = instr.description || '';
+  document.getElementById('instr-edit-body').value = instr.body || '';
+  // Auto instructions: view + delete only
+  const isAuto = instr.source === 'auto';
+  document.getElementById('instr-edit-desc').disabled = isAuto;
+  document.getElementById('instr-edit-body').disabled = isAuto;
+  document.getElementById('instr-btn-save').style.display = isAuto ? 'none' : '';
+  document.getElementById('instr-btn-delete').style.display = '';
+  document.getElementById('instr-modal').classList.add('visible');
+}
+
+function closeInstrModal() {
+  document.getElementById('instr-modal').classList.remove('visible');
+  editingInstrFilename = null;
+  editingInstrSource = null;
+}
+
+async function saveInstruction() {
+  const desc = document.getElementById('instr-edit-desc').value.trim();
+  const body = document.getElementById('instr-edit-body').value.trim();
+  if (!body) { showToast('Заполните текст инструкции', 'error'); return; }
+  const filename = editingInstrFilename || ('instr-' + Date.now() + '.md');
+  const source = editingInstrSource || 'user';
+  try {
+    const r = await fetch(`${API}/instructions/${encodeURIComponent(filename)}?scope_id=${encodeURIComponent(SCOPE)}`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: desc || body.slice(0, 200), body, source }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    closeInstrModal(); showToast(editingInstrFilename ? 'Инструкция обновлена' : 'Инструкция добавлена'); loadInstructions();
+  } catch (e) { showToast('Ошибка сохранения', 'error'); }
+}
+
+async function deleteInstruction() {
+  if (!editingInstrFilename || !confirm('Удалить эту инструкцию?')) return;
+  try {
+    const r = await fetch(`${API}/instructions/${encodeURIComponent(editingInstrFilename)}?scope_id=${encodeURIComponent(SCOPE)}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(await r.text());
+    closeInstrModal(); showToast('Инструкция удалена'); loadInstructions();
+  } catch (e) { showToast('Ошибка удаления', 'error'); }
+}
+
+// ── Shared ──
+
+function timeAgo(date) {
+  const s = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (s < 60) return 'только что';
+  if (s < 3600) return Math.floor(s/60) + ' мин. назад';
+  if (s < 86400) return Math.floor(s/3600) + ' ч. назад';
+  if (s < 604800) return Math.floor(s/86400) + ' дн. назад';
+  return date.toLocaleDateString('ru-RU');
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+function showToast(msg, kind = 'info') {
+  const c = document.getElementById('toasts');
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = `<span class="toast-icon">${kind === 'error' ? '\u26a0' : '\u2713'}</span>${esc(msg)}`;
+  c.appendChild(el);
+  setTimeout(() => { el.classList.add('fade-out'); setTimeout(() => el.remove(), 300); }, 3000);
+}
+
+// SSE for live updates
+function connectSSE() {
+  const es = new EventSource(`${API}/memory-events?scope_id=${encodeURIComponent(SCOPE)}`);
+  es.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'connected') return;
+      if (data.type === 'instruction') {
+        const action = data.action === 'deleted' ? 'удалена' : 'обновлена';
+        showToast(`Инструкция ${action}: ${data.name}`);
+        loadInstructions();
+      } else {
+        const action = data.action === 'deleted' ? 'удалена' : 'обновлена';
+        showToast(`Память ${action}: ${data.name}`);
+        loadMemories();
+      }
+    } catch {}
+  };
+  es.onerror = () => { setTimeout(connectSSE, 5000); es.close(); };
+}
+
+// Close modals on Escape
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeMemModal(); closeInstrModal(); }
+});
+document.getElementById('mem-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('mem-modal')) closeMemModal();
+});
+document.getElementById('instr-modal').addEventListener('click', e => {
+  if (e.target === document.getElementById('instr-modal')) closeInstrModal();
+});
+
+loadMemories();
+loadInstructions();
+connectSSE();
+</script>
+</body>
+</html>

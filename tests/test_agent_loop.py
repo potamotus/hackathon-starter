@@ -171,11 +171,11 @@ def test_agent_finishes_after_tool_round(monkeypatch):
     assert "Финал" in visible
 
 
-def test_agent_truncates_when_rounds_exhausted(monkeypatch):
+def test_agent_truncates_when_token_budget_exhausted(monkeypatch):
     monkeypatch.setattr("certified_turtles.agents.loop.run_primitive_tool", lambda n, a: "x")
     r_tool = _tool_response("Сначала поищу данные.", "web_search", {})
     fake = FakeMWSClient([r_tool])
-    out = run_agent_chat(fake, "m", [{"role": "user", "content": "hi"}], max_tool_rounds=1)
+    out = run_agent_chat(fake, "m", [{"role": "user", "content": "hi"}], max_agent_tokens=1000)
     assert out["truncated"] is True
     assert out["tool_rounds_used"] == 1
     assert "неполным" in out["completion"]["choices"][0]["message"]["content"]

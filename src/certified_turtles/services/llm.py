@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+from typing import Any, Iterator
 
 from certified_turtles.agent_debug_log import agent_logger, summarize_messages
 from certified_turtles.agents.loop import run_agent_chat, stream_agent_chat
@@ -11,18 +11,7 @@ from certified_turtles.tools.parent_tools import get_parent_tools
 
 _llm_log = agent_logger("llm")
 
-# Согласовано с `AgentChatRequest.max_tool_rounds` (API) и телом Open WebUI к `/v1/chat/completions`.
-_MAX_AGENT_TOOL_ROUNDS = 40
-_MIN_AGENT_TOOL_ROUNDS = 1
-
-
-def clamp_agent_tool_rounds(value: Any) -> int:
-    """Ограничивает число раундов tool-calling (защита от зависаний и мусора в JSON)."""
-    try:
-        n = int(value)
-    except (TypeError, ValueError):
-        n = 10
-    return max(_MIN_AGENT_TOOL_ROUNDS, min(_MAX_AGENT_TOOL_ROUNDS, n))
+_DEFAULT_MAX_AGENT_TOKENS = 128_000
 
 
 class LLMService:
@@ -57,6 +46,7 @@ class LLMService:
         messages: list[dict[str, Any]],
         *,
         tools: list[dict[str, Any]] | None = None,
+        request_context: RequestContext | None = None,
         **extra: Any,
     ) -> Any:
         """Одиночный запрос chat/completions. Если `tools` не заданы — подставляем полный каталог родителя."""
@@ -72,29 +62,45 @@ class LLMService:
         self,
         model: str,
         messages: list[dict[str, Any]],
+        *,
+        request_context: RequestContext | None = None,
         **extra: Any,
     ) -> Any:
         """Один запрос к MWS без тулов и без агентского JSON-цикла (как обычный чат в Open WebUI)."""
         messages = normalize_chat_messages(messages)
         _llm_log.debug("chat_plain after normalize\n%s", summarize_messages(messages))
-        call_kwargs = {k: v for k, v in extra.items() if k not in ("tools", "tool_choice")}
+        call_kwargs = {k: v for k, v in extra.items() if k not in ("tools", "tool_choice", "request_context")}
         return self._client.chat_completions(model, messages, **call_kwargs)
+
+    def chat_plain_stream(
+        self,
+        model: str,
+        messages: list[dict[str, Any]],
+        *,
+        request_context: RequestContext | None = None,
+        **extra: Any,
+    ) -> Iterator[bytes]:
+        """Plain chat with true SSE streaming from upstream."""
+        messages = normalize_chat_messages(messages)
+        call_kwargs = {k: v for k, v in extra.items() if k not in ("tools", "tool_choice", "request_context")}
+        return self._client.chat_completions_stream(model, messages, **call_kwargs)
 
     def run_agent(
         self,
         model: str,
         messages: list[dict[str, Any]],
         *,
-        max_tool_rounds: int = 10,
+        max_agent_tokens: int | None = None,
         tools: list[dict[str, Any]] | None = None,
+        request_context: RequestContext | None = None,
         **extra: Any,
     ) -> dict[str, Any]:
         """Полный agent-цикл с тулами (примитивы + под-агенты)."""
         messages = normalize_chat_messages(messages)
-        rounds = clamp_agent_tool_rounds(max_tool_rounds)
+        budget = max_agent_tokens or _DEFAULT_MAX_AGENT_TOKENS
         _llm_log.debug(
-            "run_agent after normalize max_tool_rounds=%s tools_explicit=%s\n%s",
-            rounds,
+            "run_agent after normalize max_agent_tokens=%s tools_explicit=%s\n%s",
+            budget,
             tools is not None,
             summarize_messages(messages),
         )
@@ -103,7 +109,8 @@ class LLMService:
             model,
             messages,
             tools=tools,
-            max_tool_rounds=rounds,
+            max_agent_tokens=budget,
+            request_context=request_context,
             **extra,
         )
 

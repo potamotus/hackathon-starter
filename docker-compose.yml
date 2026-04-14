@@ -6,6 +6,7 @@ services:
     command:
       - uv
       - run
+      - --no-sync
       - uvicorn
       - certified_turtles.main:app
       - --host
@@ -15,6 +16,9 @@ services:
       - --log-level
       - error
       - --no-access-log
+      - --reload
+      - --reload-dir
+      - /app/src
     ports:
       - "8000:8000"
     env_file:
@@ -36,11 +40,15 @@ services:
       # Выключить шум: CT_AGENT_DEBUG=0 в .env
       CT_AGENT_DEBUG: ${CT_AGENT_DEBUG:-1}
       CT_AGENT_DEBUG_MAX_CHARS: ${CT_AGENT_DEBUG_MAX_CHARS:-}
+      # MWS Tables (tabs.mts.ru): токен из настроек профиля.
+      MWS_TABLES_API_TOKEN: ${MWS_TABLES_API_TOKEN:-}
+      MWS_TABLES_API_BASE: ${MWS_TABLES_API_BASE:-https://tables.mws.ru/fusion/v1}
       # Google Docs: JSON service account + расшарить документ на client_email из ключа.
       # Раскомментируйте обе строки и положите ключ на хост, либо задайте абсолютный путь к файлу на хосте.
       # GOOGLE_DOCS_CREDENTIALS_JSON: /secrets/google-docs-sa.json
     volumes:
       - generated-files:/data/generated
+      - ./src:/app/src
       # Пример монтирования ключа (рядом с compose: mkdir -p secrets && cp sa.json secrets/google-docs-sa.json):
       # - ./secrets/google-docs-sa.json:/secrets/google-docs-sa.json:ro
     restart: unless-stopped
@@ -89,10 +97,12 @@ services:
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-ru-RU}
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:-change-me-in-production}
       WEBUI_URL: ${WEBUI_URL:-http://localhost:3000}
+      PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
       # Только ошибки UI; статус запросов к MWS смотри в логах сервиса api ([backend]).
       GLOBAL_LOG_LEVEL: ERROR
       HF_HUB_DISABLE_PROGRESS_BARS: "1"
       TRANSFORMERS_VERBOSITY: error
+      CT_API_BASE: http://api:8000
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

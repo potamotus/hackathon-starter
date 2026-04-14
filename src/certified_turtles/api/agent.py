@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from certified_turtles.chat_modes import prepare_chat_request
 from certified_turtles.mws_gpt.client import MWSGPTError, http_status_for_mws_error
+from certified_turtles.api.agent_config import get_max_agent_tokens
 from certified_turtles.services.llm import LLMService
 
 router = APIRouter(tags=["agent"])
@@ -18,7 +19,7 @@ router = APIRouter(tags=["agent"])
 class AgentChatRequest(BaseModel):
     model: str = Field(..., description="Идентификатор модели из allowlist ключа (например mws-gpt-alpha).")
     messages: list[dict] = Field(..., description="История в формате OpenAI chat messages.")
-    max_tool_rounds: int = Field(default=10, ge=1, le=40)
+    max_agent_tokens: int | None = Field(default=None, description="Token budget for agent loop. Uses server default if not set.")
     temperature: float | None = None
     max_tokens: int | None = None
     stream: bool = False
