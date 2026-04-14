@@ -94,6 +94,26 @@ services:
       ENABLE_PERSISTENT_CONFIG: "False"
       WEBUI_NAME: ${WEBUI_NAME:-GPTHub}
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-ru-RU}
+      TITLE_GENERATION_PROMPT_TEMPLATE: >-
+        ### Task:
+        Сгенерируй краткий заголовок из 3-5 слов с эмодзи, описывающий историю чата.
+        ### Правила:
+        - Заголовок должен чётко отражать основную тему разговора.
+        - Используй эмодзи для наглядности, но без кавычек и спецсимволов.
+        - Всегда пиши заголовок на русском языке.
+        - Точность важнее креативности — пиши понятно и просто.
+        - Ответ должен содержать только JSON-объект, без вступлений и пояснений.
+        ### Формат:
+        JSON: { "title": "краткий заголовок" }
+        ### Примеры:
+        - { "title": "📉 Тренды фондового рынка" },
+        - { "title": "🍪 Рецепт шоколадного печенья" },
+        - { "title": "🤖 ИИ в медицине" },
+        - { "title": "🎮 Разработка видеоигр" }
+        ### История чата:
+        <chat_history>
+        {{MESSAGES:END:2}}
+        </chat_history>
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:-change-me-in-production}
       WEBUI_URL: ${WEBUI_URL:-http://localhost:3000}
       PUBLIC_API_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
