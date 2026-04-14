@@ -644,7 +644,7 @@ def _stream_deep_research_gpt_researcher(
         yield st
     from certified_turtles.integrations.gpt_researcher_runner import run_gpt_researcher_sync_with_meta
 
-    meta = run_gpt_researcher_sync_with_meta(query)
+    meta = run_gpt_researcher_sync_with_meta(query, llm_model=model)
     if meta.get("ok"):
         text = str(meta.get("report") or "")
         fe = _push_trace_event(trace, "final", text, round=1, depth=delegate_depth)

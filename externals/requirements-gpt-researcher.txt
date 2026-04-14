@@ -1,3 +1,6 @@
 # assafelovic/gpt-researcher — изолированный venv (см. scripts/bootstrap_gpt_researcher_venv.sh).
 # Не смешивать с основными зависимостями приложения: у пакета свой набор langchain.
+# Явный langchain: в transitive deps 0.14.x иногда не попадает мета-пакет → No module named 'langchain'.
 gpt-researcher==0.14.4
+langchain>=0.3.17,<0.4
+ddgs>=8.1.1
