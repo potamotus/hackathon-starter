@@ -173,9 +173,9 @@ class TestFallbackSearchTarget:
         assert selected == ["a.md"]
 
     def test_keyword_in_type_matches(self):
-        """The type field (e.g., 'feedback') is included in the search haystack."""
-        headers = [_h("a.md", "Coding Style", "use functional patterns", type_="feedback")]
-        selected = fallback_select(headers, "feedback")
+        """The type field (e.g., 'reference') is included in the search haystack."""
+        headers = [_h("a.md", "Coding Style", "use functional patterns", type_="reference")]
+        selected = fallback_select(headers, "reference")
         assert selected == ["a.md"]
 
     def test_keyword_in_filename_does_NOT_match(self):
@@ -293,7 +293,7 @@ class TestToolReferenceFiltering:
     def test_non_reference_type_not_filtered(self):
         """Only type='reference' triggers tool filtering."""
         headers = [
-            _h("a.md", "grep_search tips", "grep_search usage tips", type_="feedback"),
+            _h("a.md", "grep_search tips", "grep_search usage tips", type_="user"),
         ]
         selected = fallback_select(headers, "grep_search", recent_tools=["grep_search"])
         assert selected == ["a.md"]
@@ -625,7 +625,7 @@ class TestE2ESearchToPrompt:
         ensure_session_meta(session, scope_id=scope)
 
         write_memory_file(scope, name="Deploy Warning", description="deploy warning",
-                          type_="feedback", body="Always run migrations first.",
+                          type_="project", body="Always run migrations first.",
                           filename="deploy-warn.md")
         _last_rebuild.clear()
 
@@ -635,9 +635,9 @@ class TestE2ESearchToPrompt:
             messages=[{"role": "user", "content": "deploy"}],
             scope_id=scope, session_id=session, user_query="deploy",
         )
-        # The prompt should include "### Deploy Warning (feedback)"
+        # The prompt should include "### Deploy Warning (project)"
         assert "Deploy Warning" in bundle.prompt
-        assert "(feedback)" in bundle.prompt
+        assert "(project)" in bundle.prompt
 
 
 # ═══════════════════════════════════════════════════════════════

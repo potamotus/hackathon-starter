@@ -414,12 +414,12 @@ class TestFLAW_TypeFieldPollutesSearch:
             "FLAW: 'project deadline' query matches ALL project-type memories"
         )
 
-    def test_query_feedback_matches_all_feedback_memories(self):
+    def test_query_reference_matches_all_reference_memories(self):
         headers = [
-            _h("a.md", "Code Style", "use tabs", type_="feedback"),
-            _h("b.md", "Test Approach", "integration tests", type_="feedback"),
+            _h("a.md", "Code Style", "use tabs", type_="reference"),
+            _h("b.md", "Test Approach", "integration tests", type_="reference"),
         ]
-        selected = fallback_select(headers, "give me feedback on my PR")
+        selected = fallback_select(headers, "check reference docs")
         assert "a.md" in selected and "b.md" in selected
 
 

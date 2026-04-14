@@ -380,7 +380,7 @@ class TestFallbackSelectorScoring:
         now = time.time()
         return [
             MemoryHeader("alpha.md", "Python Setup", "how to set up python virtualenv", "project", now),
-            MemoryHeader("beta.md", "Python Debugging", "python debugging with pdb and ipdb", "feedback", now),
+            MemoryHeader("beta.md", "Python Debugging", "python debugging with pdb and ipdb", "user", now),
             MemoryHeader("gamma.md", "Java Setup", "java jdk installation guide", "project", now),
             MemoryHeader("delta.md", "Python Deployment", "deploy python apps to production", "project", now),
         ]

@@ -151,7 +151,7 @@ class TestMemoryTypeValidation:
         assert fm["type"] == "project"
 
     def test_all_valid_types_accepted(self):
-        for t in ("user", "feedback", "project", "reference"):
+        for t in ("user", "project", "reference"):
             scope = f"vtype-{t}-{os.urandom(4).hex()}"
             path = write_memory_file(scope, name=f"Test {t}", description=f"test {t}",
                                      type_=t, body=f"content for {t}",
@@ -444,7 +444,7 @@ class TestExtractorPrompt:
         scope = f"ep-types-{os.urandom(4).hex()}"
         prompt = rt._extractor_prompt(scope, [{"role": "user", "content": "hi"}])
         assert "user" in prompt
-        assert "feedback" in prompt
+        assert "instruction" in prompt
         assert "project" in prompt
         assert "reference" in prompt
 
@@ -620,7 +620,7 @@ class TestScanMemoryHeaders:
     def test_reads_frontmatter_fields(self):
         scope = f"scan-fm-{os.urandom(4).hex()}"
         write_memory_file(scope, name="My Name", description="My Description",
-                          type_="feedback", body="body", filename="test-scan.md")
+                          type_="user", body="body", filename="test-scan.md")
         _last_rebuild.clear()
 
         headers = scan_memory_headers(scope)
@@ -628,7 +628,7 @@ class TestScanMemoryHeaders:
         h = headers[0]
         assert h.name == "My Name"
         assert h.description == "My Description"
-        assert h.type == "feedback"
+        assert h.type == "user"
         assert h.filename == "test-scan.md"
         assert h.mtime > 0
 

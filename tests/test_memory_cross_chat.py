@@ -334,7 +334,7 @@ class TestExtractorWritesMemory:
             self.scope,
             name="Coding style",
             description="User prefers functional style",
-            type_="feedback",
+            type_="user",
             body="When reviewing code, the user consistently prefers functional programming patterns over OOP.",
             filename="coding-style.md",
         )
@@ -345,7 +345,7 @@ class TestExtractorWritesMemory:
         assert path.is_file()
         fm = read_frontmatter(path)
         assert fm["name"] == "Coding style"
-        assert fm["type"] == "feedback"
+        assert fm["type"] == "user"
         body = read_body(path)
         assert "functional programming" in body
 

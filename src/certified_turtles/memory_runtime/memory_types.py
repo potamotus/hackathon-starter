@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-VALID_MEMORY_TYPES = ("user", "feedback", "project", "reference")
+VALID_MEMORY_TYPES = ("user", "project", "reference")
 
 TYPES_SECTION: tuple[str, ...] = (
     "## Types of memory",
@@ -19,23 +19,6 @@ TYPES_SECTION: tuple[str, ...] = (
     "",
     "    user: I've been writing Go for ten years but this is my first time touching the React side of this repo",
     "    assistant: [saves user memory: deep Go expertise, new to React and this project's frontend — frame frontend explanations in terms of backend analogues]",
-    "    </examples>",
-    "</type>",
-    "<type>",
-    "    <name>feedback</name>",
-    "    <description>Guidance the user has given you about how to approach work — both what to avoid and what to keep doing. These are a very important type of memory to read and write as they allow you to remain coherent and responsive to the way you should approach work in the project. Record from failure AND success: if you only save corrections, you will avoid past mistakes but drift away from approaches the user has already validated, and may grow overly cautious.</description>",
-    "    <when_to_save>Any time the user corrects your approach (\"no not that\", \"don't\", \"stop doing X\") OR confirms a non-obvious approach worked (\"yes exactly\", \"perfect, keep doing that\", accepting an unusual choice without pushback). Corrections are easy to notice; confirmations are quieter — watch for them. In both cases, save what is applicable to future conversations, especially if surprising or not obvious from the code. Include *why* so you can judge edge cases later.</when_to_save>",
-    "    <how_to_use>Let these memories guide your behavior so that the user does not need to offer the same guidance twice.</how_to_use>",
-    "    <body_structure>Lead with the rule itself. If the user gave a reason, add a **Why:** line. If there is a clear scope, add a **How to apply:** line. Only include these if the information was actually provided — do not invent them.</body_structure>",
-    "    <examples>",
-    "    user: don't mock the database in these tests — we got burned last quarter when mocked tests passed but the prod migration failed",
-    "    assistant: [saves feedback memory: integration tests must hit a real database, not mocks. Reason: prior incident where mock/prod divergence masked a broken migration]",
-    "",
-    "    user: stop summarizing what you just did at the end of every response, I can read the diff",
-    "    assistant: [saves feedback memory: this user wants terse responses with no trailing summaries]",
-    "",
-    "    user: yeah the single bundled PR was the right call here, splitting this one would've just been churn",
-    "    assistant: [saves feedback memory: for refactors in this area, user prefers one bundled PR over many small ones. Confirmed after I chose this approach — a validated judgment call, not a correction]",
     "    </examples>",
     "</type>",
     "<type>",
@@ -69,6 +52,20 @@ TYPES_SECTION: tuple[str, ...] = (
     "",
 )
 
+# Same types but without <examples> and <when_to_save> — for the main agent prompt.
+# Examples like "assistant: [saves user memory: ...]" cause models to mimic that behavior.
+TYPES_SECTION_BRIEF: tuple[str, ...] = (
+    "## Types of memory",
+    "",
+    "Your memory system stores these types (managed automatically, not by you):",
+    "",
+    "- **user** — who the user is: role, preferences, skills, interests. Use to tailor responses.",
+    "- **project** — decisions, goals, deadlines, team roles. Use for informed suggestions.",
+    "- **reference** — pointers to external resources (Linear, Grafana, Slack). Use when user mentions external systems.",
+    "",
+)
+
+
 WHAT_NOT_TO_SAVE_SECTION: tuple[str, ...] = (
     "## What NOT to save in memory",
     "",
@@ -77,6 +74,8 @@ WHAT_NOT_TO_SAVE_SECTION: tuple[str, ...] = (
     "- Debugging solutions or fix recipes — the fix is in the code; the commit message has the context.",
     "- Anything already documented in CLAUDE.md files.",
     "- Ephemeral task details: in-progress work, temporary state, current conversation context.",
+    "- Role or persona instructions for the current chat ('веди себя как деловой консультант', 'ты — пиратский капитан', 'act as a marketing expert'). "
+    "These set the assistant's behavior for THIS session only and are not facts about the user.",
     "",
     "These exclusions apply even when the user explicitly asks you to save. If they ask you to save a PR list or activity summary, ask what was *surprising* or *non-obvious* about it — that is the part worth keeping.",
 )
@@ -141,13 +140,25 @@ MEMORY_FRONTMATTER_EXAMPLE: tuple[str, ...] = (
     "---",
     "name: {{human-readable title, e.g. 'Food Preferences', 'Merge Freeze March 2026'}}",
     "description: {{one-line description — used to decide relevance in future conversations, so be specific}}",
-    "type: {{user, feedback, project, reference}}",
+    "type: {{user, project, reference}}",
     "---",
     "",
     "{{memory content — write only what was actually said, do not invent details}}",
     "```",
 )
 
+
+INSTRUCTION_FRONTMATTER_EXAMPLE: tuple[str, ...] = (
+    "```markdown",
+    "---",
+    "name: {{human-readable title, e.g. 'Пиши кратко', 'Always use formal tone'}}",
+    "description: {{one-line description — behavioral rule for the assistant}}",
+    "source: auto",
+    "---",
+    "",
+    "{{instruction content — the behavioral rule as stated by the user}}",
+    "```",
+)
 
 DIR_EXISTS_GUIDANCE = "This directory already exists — write to it directly with the file_write tool (do not run mkdir or check for its existence)."
 
@@ -170,8 +181,21 @@ def memory_instructions(
             "Your memory is managed by an automatic background system. You do NOT save memories yourself.",
             "",
             "CRITICAL: NEVER mention memory, saving, or remembering in your responses unless the user explicitly asks about it.",
-            "- Do NOT respond as if the user is giving you information to store. Just have a natural conversation.",
+            "- Do NOT say 'запомню', 'учту', 'сохраню', 'я помню что ты...' or anything similar.",
+            "- Respond naturally as if you have no memory system at all.",
             "- If the user explicitly asks to remember/forget something, acknowledge briefly (one short phrase) and move on.",
+            "- Always respond in first person singular masculine without gender markers (e.g. 'Запомнил', not 'Запомнил(а)').",
+            "",
+            "Examples of CORRECT behavior:",
+            "  user: люблю яблоки",
+            "  assistant: О, яблоки — отличный выбор! Какой сорт больше нравится?",
+            "",
+            "  user: я работаю дата-сайентистом",
+            "  assistant: Круто! Чем сейчас занимаешься?",
+            "",
+            "Examples of WRONG behavior (NEVER do this):",
+            "  user: люблю яблоки",
+            "  assistant: Хорошо, учту что ты любишь яблоки.  ← ЗАПРЕЩЕНО",
         ]
     elif skip_index:
         how_to_save = [
@@ -215,7 +239,7 @@ def memory_instructions(
             "",
             *how_to_save,
             "",
-            *TYPES_SECTION,
+            *TYPES_SECTION_BRIEF,
             "",
             *WHEN_TO_ACCESS_SECTION,
             "",

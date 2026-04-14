@@ -28,13 +28,13 @@ DEFAULT_SCOPE = "default-scope"
 GENERATING_PLACEHOLDER = "✨ …"
 
 
-def _generate_name_sync(body: str, mem_type: str) -> str:
+def _generate_name_sync(body: str, mem_type: str, model: str) -> str:
     """Call LLM to generate a categorical name for a memory."""
     from certified_turtles.mws_gpt.client import MWSGPTClient
     try:
         client = MWSGPTClient()
         resp = client.chat_completions(
-            "mws-gpt-4.1-mini",
+            model,
             [
                 {"role": "system", "content": (
                     "Generate a short categorical title (3-7 words) for a memory note. "
@@ -54,7 +54,9 @@ def _generate_name_sync(body: str, mem_type: str) -> str:
 
 async def _generate_name_and_update(scope_id: str, filename: str, body: str, description: str, mem_type: str):
     """Background task: generate name via LLM, then update the file."""
-    name = await asyncio.get_event_loop().run_in_executor(None, _generate_name_sync, body, mem_type)
+    from certified_turtles.memory_runtime.manager import get_last_model
+    model = get_last_model(scope_id)
+    name = await asyncio.get_event_loop().run_in_executor(None, _generate_name_sync, body, mem_type, model)
     try:
         write_memory_file(
             scope_id,
@@ -107,7 +109,7 @@ async def get_memory(filename: str, scope_id: str = Query(DEFAULT_SCOPE)) -> dic
 class MemoryWriteRequest(BaseModel):
     name: str = Field(..., max_length=200)
     description: str = Field(..., max_length=500)
-    type: str = Field(..., pattern=r"^(user|feedback|project|reference)$")
+    type: str = Field(..., pattern=r"^(user|project|reference)$")
     body: str = Field(..., max_length=4096)
 
 
@@ -172,3 +174,38 @@ async def memory_recent(scope_id: str = Query(DEFAULT_SCOPE), limit: int = Query
     bus = get_event_bus()
     events = bus.recent(scope_id=scope_id, limit=limit)
     return {"events": [e.to_dict() for e in events]}
+
+
+@router.post("/memory-dream")
+async def trigger_dream(scope_id: str = Query(DEFAULT_SCOPE)) -> dict[str, Any]:
+    """Manually trigger memory consolidation (dream) for a scope."""
+    import os
+    from certified_turtles.memory_runtime.manager import runtime_from_env
+    from certified_turtles.memory_runtime.storage import memory_dir as _mem_dir, memory_index_path
+    from certified_turtles.mws_gpt.client import DEFAULT_BASE_URL, MWSGPTClient
+
+    rt = runtime_from_env()
+    client = MWSGPTClient(base_url=os.environ.get("MWS_API_BASE", DEFAULT_BASE_URL))
+    scope = scope_id
+    mem_root = _mem_dir(scope)
+    idx_path = memory_index_path(scope)
+
+    rt._launch_post_hook(
+        client,
+        session_id="manual-dream",
+        scope_id=scope,
+        agent_id="auto_dream",
+        prompt=(
+            f"# Dream: Memory Consolidation\n\n"
+            f"You are performing a reflective pass over the memory directory `{mem_root}`.\n"
+            f"Rebuild `{idx_path}` after consolidating.\n\n"
+            "Phase 1 — Orient: list the memory directory, read MEMORY.md, inspect topic files before creating duplicates.\n"
+            "Phase 2 — Gather recent signal: use transcript evidence narrowly; do not read the entire world.\n"
+            "Phase 3 — Consolidate: merge TRUE duplicates (same domain, same file topic), convert relative dates to absolute dates, fix contradicted facts at the source. "
+            "NEVER merge files about different life domains (e.g. music and food are separate even if both are 'preferences').\n"
+            "Phase 4 — Prune and index: keep MEMORY.md concise, one-line hooks only, remove stale pointers and contradictions.\n\n"
+            "IMPORTANT: Do NOT touch the `instructions/` directory. Instructions are managed separately.\n\n"
+            "Return a brief summary of what changed. If nothing changed, say so."
+        ),
+    )
+    return {"ok": True, "message": "Dream consolidation started"}

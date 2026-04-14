@@ -17,6 +17,7 @@ from .storage import (
     MAX_MEMORY_INDEX_LINES,
     MAX_MEMORY_SESSION_BYTES,
     MAX_RELEVANT_MEMORIES,
+    list_instruction_files,
     memory_dir,
     memory_index_path,
     read_json,
@@ -184,6 +185,23 @@ def build_memory_prompt(
         parts.extend(["", "## MEMORY.md", "", index_content])
     else:
         parts.extend(["", "## MEMORY.md", "", "Your MEMORY.md is currently empty. When you save new memories, they will appear here."])
+
+    # Instructions — always injected (not by relevance)
+    instr_files = list_instruction_files(scope_id)
+    if instr_files:
+        parts.append("")
+        parts.append("## instructions")
+        parts.append("")
+        parts.append("The following behavioral rules were set by the user. Follow them in every response.")
+        for ipath in instr_files:
+            body = read_body(ipath).strip()
+            if not body:
+                continue
+            fm = read_frontmatter(ipath)
+            title = fm.get("name", ipath.stem)
+            source = fm.get("source", "user")
+            parts.append(f"### {title} (source: {source})")
+            parts.append(body)
 
     headers = scan_memory_headers(scope_id)
     selected: list[str] = []

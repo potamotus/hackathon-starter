@@ -35,7 +35,8 @@ MAX_MEMORY_INDEX_BYTES = 25_000
 MAX_MEMORY_FILE_BYTES = 4 * 1024
 MAX_MEMORY_SESSION_BYTES = 60 * 1024
 MAX_RELEVANT_MEMORIES = 5
-VALID_MEMORY_TYPES = {"user", "feedback", "project", "reference"}
+VALID_MEMORY_TYPES = {"user", "project", "reference"}
+VALID_INSTRUCTION_SOURCES = {"auto", "user"}
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 SAFE_SEGMENT_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 FRONTMATTER_SCAN_LINES = 30
@@ -53,6 +54,15 @@ class MemoryHeader:
     name: str
     description: str
     type: str
+    mtime: float
+
+
+@dataclass(frozen=True)
+class InstructionHeader:
+    filename: str
+    name: str
+    description: str
+    source: str
     mtime: float
 
 
@@ -134,6 +144,17 @@ def memory_dir(scope_id: str) -> Path:
         _legacy_bucket_name(scope_id, fallback="default-scope"),
     )
     path = bucket / "memory"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def instructions_dir(scope_id: str) -> Path:
+    bucket = _ensure_bucket(
+        projects_root(),
+        scope_slug(scope_id),
+        _legacy_bucket_name(scope_id, fallback="default-scope"),
+    )
+    path = bucket / "instructions"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -419,6 +440,122 @@ def rebuild_memory_index(scope_id: str, *, force: bool = False) -> Path:
     path = memory_index_path(scope_id)
     _atomic_write_text(path, text, encoding="utf-8")
     return path
+
+
+def resolve_instruction_path(scope_id: str, filename: str | None, *, fallback_name: str) -> Path:
+    root = instructions_dir(scope_id)
+    rel = _validate_memory_filename(filename, fallback_name=fallback_name)
+    path = (root / rel).resolve(strict=False)
+    root_resolved = root.resolve(strict=False)
+    try:
+        path.relative_to(root_resolved)
+    except ValueError as exc:
+        raise ValueError("instruction path escaped the instructions directory") from exc
+    return path
+
+
+def list_instruction_files(scope_id: str) -> list[Path]:
+    root = instructions_dir(scope_id)
+    files: list[tuple[float, Path]] = []
+    for p in root.rglob("*.md"):
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            continue
+        files.append((mtime, p))
+    files.sort(key=lambda t: t[0], reverse=True)
+    return [p for _, p in files[:MAX_MEMORY_FILES]]
+
+
+def scan_instruction_headers(scope_id: str) -> list[InstructionHeader]:
+    headers: list[InstructionHeader] = []
+    for path in list_instruction_files(scope_id):
+        try:
+            preview = "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[:FRONTMATTER_SCAN_LINES])
+        except OSError:
+            continue
+        fm = parse_frontmatter(preview)
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        headers.append(
+            InstructionHeader(
+                filename=str(path.relative_to(instructions_dir(scope_id))),
+                name=fm.get("name", path.stem),
+                description=fm.get("description", ""),
+                source=fm.get("source", "user"),
+                mtime=stat.st_mtime,
+            )
+        )
+    return headers
+
+
+def write_instruction_file(
+    scope_id: str,
+    *,
+    name: str,
+    description: str,
+    body: str,
+    filename: str | None = None,
+    source: str = "user",
+) -> Path:
+    if source not in VALID_INSTRUCTION_SOURCES:
+        _log.warning("invalid instruction source %r, falling back to 'user'", source)
+        source = "user"
+    body_text = body.strip()
+    body_bytes = len(body_text.encode("utf-8"))
+    if body_bytes > MAX_MEMORY_FILE_BYTES:
+        raise ValueError(
+            f"instruction body is too large ({body_bytes} bytes > {MAX_MEMORY_FILE_BYTES} byte limit)"
+        )
+    path = resolve_instruction_path(scope_id, filename, fallback_name=name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    already_existed = path.exists()
+    now = _utc_now_iso()
+    created = now
+    if already_existed:
+        existing = read_frontmatter(path)
+        created = existing.get("created", now)
+    payload = (
+        "---\n"
+        f"name: {_frontmatter_scalar(name)}\n"
+        f"description: {_frontmatter_scalar(description)}\n"
+        f"source: {_frontmatter_scalar(source)}\n"
+        f"created: {_frontmatter_scalar(created)}\n"
+        f"updated: {_frontmatter_scalar(now)}\n"
+        "---\n\n"
+        f"{body_text}\n"
+    )
+    _atomic_write_text(path, payload, encoding="utf-8")
+    try:
+        rel = str(path.resolve().relative_to(instructions_dir(scope_id).resolve()))
+    except ValueError:
+        rel = path.name
+    _emit_memory_event(
+        action="updated" if already_existed else "created",
+        scope_id=scope_id,
+        filename=rel,
+        memory_type="instruction",
+        name=name,
+    )
+    return path
+
+
+def delete_instruction_file(scope_id: str, filename: str) -> bool:
+    path = resolve_instruction_path(scope_id, filename, fallback_name="instruction")
+    if not path.is_file():
+        return False
+    fm = read_frontmatter(path)
+    path.unlink()
+    _emit_memory_event(
+        action="deleted",
+        scope_id=scope_id,
+        filename=filename,
+        memory_type="instruction",
+        name=fm.get("name", filename),
+    )
+    return True
 
 
 def append_transcript_event(session_id: str, payload: dict[str, Any]) -> None:

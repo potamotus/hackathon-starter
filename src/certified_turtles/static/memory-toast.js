@@ -80,10 +80,49 @@
     };
   }
 
+  // ── i18n patch: translate Memory admin page to Russian ──
+  const MEMORY_I18N = {
+    'Manage Memories': 'Управление памятью',
+    'Memories accessible by LLMs will be shown here.': 'Воспоминания, доступные ассистенту, будут отображаться здесь.',
+    'NAME': 'НАЗВАНИЕ',
+    'TYPE': 'ТИП',
+    'LAST MODIFIED': 'ИЗМЕНЕНО',
+    'Add Memory': 'Добавить',
+    'Clear memory': 'Очистить память',
+    'No memories to clear': 'Нет воспоминаний для удаления',
+    'Loading...': 'Загрузка...',
+  };
+
+  const TYPE_RU = { user: 'Пользователь', feedback: 'Обратная связь', project: 'Проект', reference: 'Ссылки' };
+
+  function patchMemoryPage() {
+    // Only run on the admin settings page
+    if (!location.pathname.includes('/admin/settings')) return;
+
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      const trimmed = node.textContent.trim();
+      // Exact match replacements
+      if (MEMORY_I18N[trimmed]) {
+        node.textContent = node.textContent.replace(trimmed, MEMORY_I18N[trimmed]);
+      }
+      // Type labels in filter chips and badges
+      if (TYPE_RU[trimmed]) {
+        node.textContent = node.textContent.replace(trimmed, TYPE_RU[trimmed]);
+      }
+    }
+  }
+
+  // Observe DOM changes to patch after Svelte renders
+  const observer = new MutationObserver(() => patchMemoryPage());
+  observer.observe(document.body, { childList: true, subtree: true });
+
   // Wait for page to be ready
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', connect);
+    document.addEventListener('DOMContentLoaded', () => { connect(); patchMemoryPage(); });
   } else {
     connect();
+    patchMemoryPage();
   }
 })();

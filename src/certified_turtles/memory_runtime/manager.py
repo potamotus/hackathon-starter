@@ -12,6 +12,7 @@ from certified_turtles.mws_gpt.client import MWSGPTClient
 
 from .forking import CacheSafeSnapshot, ForkRuntime
 from .memory_types import (
+    INSTRUCTION_FRONTMATTER_EXAMPLE,
     MEMORY_FRONTMATTER_EXAMPLE,
     TYPES_SECTION,
     WHAT_NOT_TO_SAVE_SECTION,
@@ -21,12 +22,14 @@ from .storage import (
     append_transcript_event,
     ensure_session_meta,
     format_memory_manifest,
+    instructions_dir,
     list_scope_sessions,
     memory_dir,
     memory_index_path,
     read_json,
     read_last_consolidated_at,
     read_session_memory,
+    scan_instruction_headers,
     scan_memory_headers,
     scope_meta_path,
     session_meta_path,
@@ -37,6 +40,17 @@ from .storage import (
 
 _log = agent_logger("memory_runtime")
 _RUNTIME: "ClaudeLikeMemoryRuntime | None" = None
+
+def _save_last_model(scope_id: str, model: str) -> None:
+    meta = read_json(scope_meta_path(scope_id)) or {}
+    if meta.get("last_model") != model:
+        meta["last_model"] = model
+        write_json(scope_meta_path(scope_id), meta)
+
+
+def get_last_model(scope_id: str) -> str:
+    meta = read_json(scope_meta_path(scope_id)) or {}
+    return meta.get("last_model", "")
 
 # ── Compaction constants ─────────────────────────────────────
 
@@ -172,6 +186,7 @@ class ClaudeLikeMemoryRuntime:
         scope_id: str,
     ) -> list[dict[str, Any]]:
         ensure_session_meta(session_id, scope_id=scope_id)
+        _save_last_model(scope_id, model)
         query = self._last_user_text(messages)
         prompt = build_memory_prompt(
             client,
@@ -548,8 +563,20 @@ class ClaudeLikeMemoryRuntime:
         """Match Claude Code's buildExtractAutoOnlyPrompt / opener()."""
         window = _extract_window_size()
         mem_root = memory_dir(scope_id)
+        instr_root = instructions_dir(scope_id)
         headers = scan_memory_headers(scope_id)
         manifest = format_memory_manifest(headers) if headers else ""
+
+        # Instructions manifest
+        instr_headers = scan_instruction_headers(scope_id)
+        instr_manifest = ""
+        if instr_headers:
+            lines: list[str] = []
+            for ih in instr_headers:
+                from datetime import datetime, timezone
+                ts = datetime.fromtimestamp(ih.mtime, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(ih.mtime * 1000) % 1000:03d}Z"
+                lines.append(f"- [{ih.source}] {ih.filename} ({ts}): {ih.description}")
+            instr_manifest = "\n".join(lines)
 
         manifest_section = ""
         if manifest:
@@ -557,9 +584,19 @@ class ClaudeLikeMemoryRuntime:
                 "\n\n## Existing memory files\n\n"
                 f"{manifest}\n\n"
                 "IMPORTANT: On your FIRST turn, file_read ALL existing memory files listed above. "
-                "You need their contents to decide whether to update an existing file or create a new one. "
-                "If a new message clarifies, corrects, or adds detail to something already saved — "
-                "UPDATE the existing file instead of creating a duplicate."
+                "You need their contents to decide whether to update an existing file or create a new one.\n\n"
+                "SPLITTING RULE: Split files by LIFE DOMAIN, not by abstract category. "
+                "Music → `user_music.md`, food → `user_food.md`, pets → `user_pets.md`, "
+                "work → `user_work.md`, family → `user_family.md`. "
+                "NEVER create a generic file like `user_preferences.md` or `user_interests.md` — "
+                "those are too broad. Always use the specific domain. "
+                "Only UPDATE an existing file if the new info belongs to the SAME domain."
+            )
+        if instr_manifest:
+            manifest_section += (
+                "\n\n## Existing instruction files\n\n"
+                f"{instr_manifest}\n\n"
+                "file_read existing instructions on your first turn too, to avoid duplicates."
             )
 
         # Build how_to_save section (2-step process matching Claude Code)
@@ -578,6 +615,15 @@ class ClaudeLikeMemoryRuntime:
             "- Organize memory semantically by topic, not chronologically",
             "- Update or remove memories that turn out to be wrong or outdated",
             "- Do not write duplicate memories. First check if there is an existing memory you can update before writing a new one.",
+            "- Split by life domain: `user_music.md`, `user_food.md`, `user_pets.md` — NEVER generic files like `user_preferences.md`",
+            "",
+            "## Updating existing files",
+            "",
+            "When a memory file ALREADY EXISTS and you need to add or change info:",
+            "- Use `file_edit` to modify ONLY the body (the text BELOW the closing `---` of the frontmatter block).",
+            "- NEVER rewrite or touch the frontmatter fields (name, description, type, created, updated, source).",
+            "- NEVER use `file_write` to overwrite an existing memory file — always `file_edit`.",
+            "- Use `file_write` ONLY when creating a brand-new file that does not exist yet.",
         ]
 
         # Lean prompt: opener + explicit-save + TYPES + WHAT_NOT_TO_SAVE + how_to_save
@@ -617,7 +663,12 @@ class ClaudeLikeMemoryRuntime:
             "Rule: when in doubt whether old and new conflict, treat them as conflicting.",
             "2. Does this reveal WHO the user is? (interests, pets, family, job, skills, location, "
             "preferences, habits, opinions, likes/dislikes, personal facts) → save as `user`",
-            "3. Does this tell you HOW the user wants you to work? (corrections, praise, style preferences) → save as `feedback`",
+            "3. Does the user EXPLICITLY ask to remember a BEHAVIORAL RULE for ALL chats? "
+            "(key phrases: 'запомни', 'запомни для всех чатов', 'always', 'remember for all chats', "
+            "'во всех чатах', 'в каждом чате') "
+            f"→ save as instruction to `{instr_root}` with frontmatter `source: auto`. "
+            "Without an EXPLICIT request — do NOT save an instruction. "
+            "Corrections/praise about work style that are NOT marked 'for all chats' are NOT instructions — skip them.",
             "4. Does this tell you about a project DECISION, GOAL, DEADLINE, or TEAM role? → save as `project`. "
             "Operational steps (configured X, installed Y, connected Z) are NOT project context — skip them.",
             "5. Does this point to an external resource? → save as `reference`",
@@ -625,7 +676,15 @@ class ClaudeLikeMemoryRuntime:
             "",
             "IMPORTANT: Do NOT save knowledge that is ONLY needed to complete the agent's current task.",
             "",
-            "When writing file content: facts only, no meta-commentary or reasoning. "
+            "CRITICAL: Write memory content AND the frontmatter `name` field in the SAME LANGUAGE the user speaks. "
+            "If the user writes in Russian, the name must be in Russian (e.g. 'Пищевые предпочтения', not 'Food Preferences'). "
+            "Match the user's language exactly in all fields.",
+            "",
+            "When writing file content: summarize and structure facts, do NOT copy user messages verbatim. "
+            "Record ONLY what the user actually said — never add interpretations, emotions, or motivations "
+            "(BAD: 'не удовлетворён стилем и просит...'; GOOD: 'Предпочитает официальный тон.'). "
+            "BAD: 'Люблю яблоки\\nЛюблю пасту томатную' (raw copy-paste). "
+            "GOOD: 'Любимая еда: яблоки (особенно Антоновка), томатная паста, пицца, мармелад.' (structured summary). "
             "If a memory relates to other files, add a `## Related` section at the bottom (e.g. `- [project_wikilive_tables.md]`).",
             "",
             "Default: SAVE. The cost of saving something unnecessary is near zero (pruned later). "
@@ -636,6 +695,14 @@ class ClaudeLikeMemoryRuntime:
             *WHAT_NOT_TO_SAVE_SECTION,
             "",
             *how_to_save,
+            "",
+            "## How to save instructions",
+            "",
+            f"Instructions are behavioral rules saved to `{instr_root}`. Use this frontmatter format:",
+            "",
+            *INSTRUCTION_FRONTMATTER_EXAMPLE,
+            "",
+            "Instructions do NOT go into MEMORY.md index. They are always loaded into the system prompt.",
         ]
 
         return "\n".join(parts)
@@ -754,8 +821,10 @@ class ClaudeLikeMemoryRuntime:
                 f"Rebuild `{memory_index_path(scope_id)}` after consolidating.\n\n"
                 "Phase 1 — Orient: list the memory directory, read MEMORY.md, inspect topic files before creating duplicates.\n"
                 "Phase 2 — Gather recent signal: use transcript evidence narrowly; do not read the entire world.\n"
-                "Phase 3 — Consolidate: merge duplicates, convert relative dates to absolute dates, fix contradicted facts at the source.\n"
+                "Phase 3 — Consolidate: merge TRUE duplicates (same domain, same file topic), convert relative dates to absolute dates, fix contradicted facts at the source. "
+                "NEVER merge files about different life domains (e.g. music and food are separate even if both are 'preferences').\n"
                 "Phase 4 — Prune and index: keep MEMORY.md concise, one-line hooks only, remove stale pointers and contradictions.\n\n"
+                "IMPORTANT: Do NOT touch the `instructions/` directory. Instructions are managed separately.\n\n"
                 "Return a brief summary of what changed. If nothing changed, say so."
             ),
         )

@@ -29,14 +29,12 @@
 
 	const TYPE_COLORS: Record<string, string> = {
 		user: '#5b8def',
-		feedback: '#e5a73b',
 		project: '#5bcc7b',
 		reference: '#b07bef'
 	};
 
 	const TYPE_LABELS: Record<string, string> = {
 		user: 'user',
-		feedback: 'feedback',
 		project: 'project',
 		reference: 'reference'
 	};
@@ -104,7 +102,7 @@
 
 		<!-- Type filter chips -->
 		<div class="flex gap-1.5 px-5 pb-2 flex-wrap">
-			{#each ['all', 'user', 'feedback', 'project', 'reference'] as t}
+			{#each ['all', 'user', 'project', 'reference'] as t}
 				<button
 					class="px-2.5 py-0.5 text-xs rounded-full transition-colors {filter === t
 						? 'bg-blue-600 text-white'

@@ -24,16 +24,14 @@
 
 	const TYPE_COLORS: Record<string, string> = {
 		user: '#5b8def',
-		feedback: '#e5a73b',
 		project: '#5bcc7b',
 		reference: '#b07bef'
 	};
 
 	const TYPE_LABELS: Record<string, string> = {
-		user: 'user',
-		feedback: 'feedback',
-		project: 'project',
-		reference: 'reference'
+		user: 'Пользователь',
+		project: 'Проект',
+		reference: 'Ссылки'
 	};
 
 	$: filtered = filter === 'all' ? memories : memories.filter((m: any) => m.memory_type === filter);
@@ -53,7 +51,7 @@
 			return null;
 		});
 		if (res && memories.length > 0) {
-			toast.success($i18n.t('Memory cleared successfully'));
+			toast.success('Память очищена');
 			memories = [];
 		}
 		showClearConfirmDialog = false;
@@ -70,7 +68,7 @@
 				try {
 					const data = JSON.parse(e.data);
 					if (data.type === 'connected') return;
-					toast.success($i18n.t('Memory updated'));
+					toast.success('Память обновлена');
 					loadMemories();
 				} catch {}
 			};
@@ -92,20 +90,20 @@
 	<div class="space-y-3 overflow-y-scroll scrollbar-hidden h-full pr-1.5">
 		<div>
 			<div class="mb-2">
-				<div class="text-sm font-medium">{$i18n.t('Manage Memories')}</div>
-				<div class="text-xs text-gray-500">{$i18n.t('Memories accessible by LLMs will be shown here.')}</div>
+				<div class="text-sm font-medium">Управление памятью</div>
+				<div class="text-xs text-gray-500">Воспоминания, доступные ассистенту, будут отображаться здесь.</div>
 			</div>
 
 			<!-- Type filter chips -->
 			<div class="flex gap-1.5 mb-3 flex-wrap">
-				{#each ['all', 'user', 'feedback', 'project', 'reference'] as t}
+				{#each ['all', 'user', 'project', 'reference'] as t}
 					<button
 						class="px-2.5 py-0.5 text-xs rounded-full transition-colors {filter === t
 							? 'bg-blue-600 text-white'
 							: 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'}"
 						on:click={() => (filter = t)}
 					>
-						{t === 'all' ? $i18n.t('All') : TYPE_LABELS[t] || t}
+						{t === 'all' ? 'Все' : TYPE_LABELS[t] || t}
 						{#if t !== 'all'}
 							<span class="ml-0.5 opacity-60">{memories.filter((m) => m.memory_type === t).length}</span>
 						{/if}
@@ -115,16 +113,16 @@
 
 			<!-- Memory table -->
 			{#if loading}
-				<div class="text-center py-8 text-gray-500">{$i18n.t('Loading...')}</div>
+				<div class="text-center py-8 text-gray-500">Загрузка...</div>
 			{:else if filtered.length > 0}
 				<div class="text-left text-sm w-full overflow-y-auto max-h-[calc(100vh-20rem)]">
 					<div class="relative overflow-x-auto">
 						<table class="w-full text-sm text-left text-gray-600 dark:text-gray-400 table-auto">
 							<thead class="text-xs text-gray-700 uppercase bg-transparent dark:text-gray-200 border-b-2 border-gray-50 dark:border-gray-850/30">
 								<tr>
-									<th scope="col" class="px-3 py-2">{$i18n.t('Name')}</th>
-									<th scope="col" class="px-3 py-2 hidden md:table-cell">{$i18n.t('Type')}</th>
-									<th scope="col" class="px-3 py-2 hidden md:table-cell">{$i18n.t('Last Modified')}</th>
+									<th scope="col" class="px-3 py-2">Название</th>
+									<th scope="col" class="px-3 py-2 hidden md:table-cell">Тип</th>
+									<th scope="col" class="px-3 py-2 hidden md:table-cell">Изменено</th>
 									<th scope="col" class="px-3 py-2 text-right" />
 								</tr>
 							</thead>
@@ -159,7 +157,7 @@
 										</td>
 										<td class="px-3 py-1">
 											<div class="flex justify-end w-full">
-												<Tooltip content={$i18n.t('Edit')}>
+												<Tooltip content={'Редактировать'}>
 													<button
 														class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 														on:click={() => { selectedMemory = memory; showEditMemoryModal = true; }}
@@ -169,12 +167,12 @@
 														</svg>
 													</button>
 												</Tooltip>
-												<Tooltip content={$i18n.t('Delete')}>
+												<Tooltip content={'Удалить'}>
 													<button
 														class="self-center w-fit text-sm px-2 py-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl"
 														on:click={async () => {
 															const res = await deleteMemoryById(localStorage.token, memory.id).catch((error) => { toast.error(`${error}`); return null; });
-															if (res) { toast.success($i18n.t('Memory deleted successfully')); await loadMemories(); }
+															if (res) { toast.success('Запись удалена'); await loadMemories(); }
 														}}
 													>
 														<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4">
@@ -192,7 +190,7 @@
 				</div>
 			{:else}
 				<div class="text-center py-12 text-gray-500">
-					{$i18n.t('Memories accessible by LLMs will be shown here.')}
+					Воспоминания, доступные ассистенту, будут отображаться здесь.
 				</div>
 			{/if}
 		</div>
@@ -202,17 +200,17 @@
 		<button
 			class="px-3.5 py-1.5 font-medium hover:bg-black/5 dark:hover:bg-white/5 outline outline-1 outline-gray-100 dark:outline-gray-800 rounded-3xl"
 			on:click={() => { showAddMemoryModal = true; }}
-		>{$i18n.t('Add Memory')}</button>
+		>Добавить</button>
 		<button
 			class="px-3.5 py-1.5 font-medium text-red-500 hover:bg-black/5 dark:hover:bg-white/5 outline outline-1 outline-red-100 dark:outline-red-800 rounded-3xl"
-			on:click={() => { if (memories.length > 0) { showClearConfirmDialog = true; } else { toast.error($i18n.t('No memories to clear')); } }}
-		>{$i18n.t('Clear memory')}</button>
+			on:click={() => { if (memories.length > 0) { showClearConfirmDialog = true; } else { toast.error('Нет воспоминаний для удаления'); } }}
+		>Очистить память</button>
 	</div>
 </div>
 
 <ConfirmDialog
-	title={$i18n.t('Clear Memory')}
-	message={$i18n.t('Are you sure you want to clear all memories? This action cannot be undone.')}
+	title={'Очистить память'}
+	message={'Вы уверены? Все воспоминания будут удалены. Это действие нельзя отменить.'}
 	show={showClearConfirmDialog}
 	on:confirm={onClearConfirmed}
 	on:cancel={() => { showClearConfirmDialog = false; }}

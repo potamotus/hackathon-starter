@@ -254,7 +254,7 @@ class TestSelectorFallback:
         return [
             MemoryHeader("python-setup.md", "Python Setup", "how to set up python env", "project", time.time()),
             MemoryHeader("api-keys.md", "API Keys", "api key management guide", "reference", time.time()),
-            MemoryHeader("debugging.md", "Debugging Tips", "python debugging techniques", "feedback", time.time()),
+            MemoryHeader("debugging.md", "Debugging Tips", "python debugging techniques", "user", time.time()),
         ]
 
     def test_selector_llm_failure_returns_empty(self):
