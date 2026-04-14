@@ -180,6 +180,11 @@ async def memory_page():
     return FileResponse(_STATIC_DIR / "memory.html", media_type="text/html")
 
 
+@app.get("/figma")
+async def figma_plugin_page():
+    return FileResponse(_STATIC_DIR / "figma.html", media_type="text/html")
+
+
 @app.get("/static/{filename}")
 async def serve_static(filename: str):
     path = _STATIC_DIR / filename

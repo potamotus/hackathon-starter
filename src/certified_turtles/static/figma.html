@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>GPTHub — Figma Assistant</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Inter, system-ui, sans-serif; background: #111827; color: #fff; display: flex; flex-direction: column; min-height: 100vh; padding: 12px 14px; }
+  h1 { font-size: 1.3rem; font-weight: 700; margin-bottom: 8px; }
+
+  .selection-preview { font-size: 0.78rem; color: #9ca3af; margin-bottom: 8px; min-height: 1.2em; }
+  .selection-preview span { color: #d1d5db; }
+
+  .section-label { font-size: 0.7rem; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; margin: 6px 0 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
+  .chip { padding: 4px 9px; border: 1px solid #374151; border-radius: 12px; background: transparent; color: #d1d5db; font-size: 0.72rem; cursor: pointer; transition: background .15s; }
+  .chip:hover { background: #1f2937; }
+  .chip.design { border-color: #4338ca; color: #a5b4fc; }
+  .chip.design:hover { background: #1e1b4b; }
+  .chip:disabled { opacity: .4; cursor: default; }
+
+  .prompt-row { display: flex; gap: 6px; margin: 8px 0; }
+  #prompt { flex: 1; padding: 8px 10px; border: 1px solid #374151; border-radius: 8px; background: #1f2937; color: #fff; font-size: 0.82rem; font-family: inherit; resize: none; outline: none; }
+  #prompt:focus { border-color: #6366f1; }
+  #prompt::placeholder { color: #6b7280; }
+
+  .action-buttons { display: flex; gap: 6px; margin-bottom: 8px; }
+  button.action { padding: 6px 12px; border: none; border-radius: 6px; color: #fff; font-size: 0.78rem; cursor: pointer; }
+  button.action:disabled { opacity: .4; cursor: default; }
+  .btn-show { background: #4f46e5; }
+  .btn-show:hover:not(:disabled) { background: #4338ca; }
+  .btn-canvas { background: #16a34a; }
+  .btn-canvas:hover:not(:disabled) { background: #15803d; }
+  .btn-replace { background: #d97706; }
+  .btn-replace:hover:not(:disabled) { background: #b45309; }
+
+  #output { border: 1px solid #374151; border-radius: 8px; padding: 10px; background: #1f2937; white-space: pre-wrap; font-size: 0.82rem; color: #e5e7eb; display: none; flex: 1; overflow-y: auto; }
+  #status { font-size: 0.75rem; color: #6b7280; margin-top: 4px; min-height: 1em; }
+</style>
+</head>
+<body>
+
+<h1>GPTHub Assistant</h1>
+<div class="selection-preview" id="sel-preview">Select a text layer in Figma</div>
+
+<div class="section-label">Text</div>
+<div class="chips">
+  <button class="chip" data-mode="text" data-prompt="Rewrite this text to be more concise and clear. Keep the same language.">Rewrite</button>
+  <button class="chip" data-mode="text" data-prompt="Make this text shorter, keep the key meaning. Keep the same language.">Shorten</button>
+  <button class="chip" data-mode="text" data-prompt="Make this text longer and more detailed. Keep the same language.">Expand</button>
+  <button class="chip" data-mode="text" data-prompt="Fix grammar and spelling. Keep the same language.">Fix grammar</button>
+  <button class="chip" data-mode="text" data-prompt="Translate this text to English.">EN</button>
+  <button class="chip" data-mode="text" data-prompt="Translate this text to Russian.">RU</button>
+</div>
+
+<div class="section-label">Generate design</div>
+<div class="chips">
+  <button class="chip design" data-mode="design" data-prompt="Create a presentation slide about this topic. Dark modern style, 1280x720.">Slide</button>
+  <button class="chip design" data-mode="design" data-prompt="Create a set of 4-5 presentation slides about this topic. Dark modern style, 1280x720. Include a title slide, content slides, and a closing slide.">Presentation</button>
+  <button class="chip design" data-mode="design" data-prompt="Create a UI card component: image placeholder, title, description, action button. Modern style, 320x400.">Card</button>
+  <button class="chip design" data-mode="design" data-prompt="Create a hero section: large headline, subtitle, CTA button, decorative elements. 1280x600.">Hero section</button>
+  <button class="chip design" data-mode="design" data-prompt="Create a feature list section: 3 features in a row, each with an icon placeholder, title and description. 1280x400.">Features</button>
+  <button class="chip design" data-mode="design" data-prompt="Create a mobile app screen wireframe: header, content area, bottom navigation. 390x844.">Mobile screen</button>
+</div>
+
+<div class="prompt-row">
+  <textarea id="prompt" rows="2" placeholder="Describe what you want (e.g. &quot;create a slide about AI trends&quot;, &quot;translate to French&quot;)"></textarea>
+</div>
+
+<div class="action-buttons">
+  <button class="action btn-show" id="btn-show">Preview</button>
+  <button class="action btn-canvas" id="btn-canvas">Create on canvas</button>
+  <button class="action btn-replace" id="btn-replace">Replace selected</button>
+</div>
+
+<div id="status"></div>
+<div id="output"></div>
+
+<script>
+/* ── Figma postMessage bridge ── */
+class FigmaAPI {
+  constructor() { this._id = 0; }
+  run(fn, params) {
+    return new Promise((resolve, reject) => {
+      const id = this._id++;
+      const cb = (e) => {
+        if (e.origin !== 'https://www.figma.com' && e.origin !== 'https://staging.figma.com') return;
+        const m = e.data.pluginMessage;
+        if (!m || m.id !== id) return;
+        if (m.type === 'EVAL_RESULT') { window.removeEventListener('message', cb); resolve(m.result); }
+        if (m.type === 'EVAL_REJECT')  { window.removeEventListener('message', cb); reject(new Error(m.error || 'FigmaAPI error')); }
+      };
+      window.addEventListener('message', cb);
+      const msg = { pluginMessage: { type: 'EVAL', code: fn.toString(), id, params }, pluginId: '*' };
+      ['https://www.figma.com', 'https://staging.figma.com'].forEach(origin => {
+        try { parent.postMessage(msg, origin); } catch {}
+      });
+    });
+  }
+}
+const figmaAPI = new FigmaAPI();
+
+/* ── Figma helpers ── */
+async function getTextForSelection() {
+  return figmaAPI.run((figma) => {
+    const get = (n) => n.type === 'TEXT' ? n.characters : (n.type === 'STICKY' || n.type === 'SHAPE_WITH_TEXT') ? n.text.characters : null;
+    const layers = [];
+    for (const node of figma.currentPage.selection) {
+      if ('findAllWithCriteria' in node) {
+        node.findAllWithCriteria({ types: ['TEXT','STICKY','SHAPE_WITH_TEXT'] }).map(get).filter(Boolean).forEach(t => layers.push(t));
+      }
+      const t = get(node);
+      if (t !== null) layers.push(t);
+    }
+    return layers;
+  });
+}
+
+async function getTextOffset() {
+  const b = await figmaAPI.run((figma) => {
+    return figma.currentPage.selection.reduce((a, n) => {
+      const bb = n.absoluteBoundingBox;
+      if (!bb) return a;
+      return { top: Math.min(a.top, bb.y), right: Math.max(a.right, bb.x + bb.width) };
+    }, { top: Infinity, right: -Infinity });
+  });
+  if (b.top === Infinity || b.right === -Infinity) return null;
+  return { x: b.right + 48, y: b.top };
+}
+
+function notify(msg, error) {
+  figmaAPI.run((figma, p) => { figma.notify(p.msg, { error: p.error }); }, { msg, error: !!error });
+}
+
+/* ── Selection preview ── */
+const selPreview = document.getElementById('sel-preview');
+let cachedLayers = [];
+async function refreshSelection() {
+  try {
+    cachedLayers = await getTextForSelection();
+    if (cachedLayers.length) {
+      const preview = cachedLayers.join(' | ');
+      selPreview.innerHTML = 'Selected: <span>' + (preview.length > 100 ? preview.slice(0, 97) + '...' : preview) + '</span>';
+    } else {
+      selPreview.textContent = 'No text selected (optional for design generation)';
+    }
+  } catch {}
+}
+setInterval(refreshSelection, 1500);
+refreshSelection();
+
+/* ── Mode tracking ── */
+let currentMode = 'text'; // 'text' or 'design'
+
+/* ── System prompts ── */
+const TEXT_SYSTEM = `You are GPTHub Assistant embedded in Figma.
+The user gives you text from their design and an instruction.
+Follow the instruction precisely. Return ONLY the resulting text, no explanations, no markdown, no quotes.
+Preserve line breaks. Match the original language unless asked to translate.`;
+
+const DESIGN_SYSTEM = `You are GPTHub Designer — an AI that creates Figma designs described as JSON.
+Return ONLY valid JSON (no markdown fences, no explanation) matching this schema:
+{
+  "frames": [
+    {
+      "name": "string",
+      "width": 1280,
+      "height": 720,
+      "fill": "#hex",
+      "children": [
+        { "type": "text", "text": "...", "x": 0, "y": 0, "fontSize": 24, "color": "#hex", "fontStyle": "Regular|Medium|Bold|SemiBold", "width": 0 },
+        { "type": "rect", "x": 0, "y": 0, "width": 100, "height": 100, "fill": "#hex", "cornerRadius": 0 },
+        { "type": "ellipse", "x": 0, "y": 0, "width": 60, "height": 60, "fill": "#hex" }
+      ]
+    }
+  ]
+}
+Rules:
+- Create visually appealing designs with clear hierarchy, good spacing, and contrast.
+- Use dark backgrounds (#0f172a, #1e1b4b, #111827) with light text for modern look, unless told otherwise.
+- Use accent colors for highlights and CTAs (#6366f1, #e94560, #22d3ee, #f59e0b).
+- text.width is optional: set it to enable wrapping for long text (e.g. descriptions).
+- text.fontStyle: use Bold for headings, SemiBold for subheadings, Medium for body, Regular for captions.
+- For icon placeholders use small ellipses or rounded rects with accent fills.
+- All coordinates are relative to the frame (0,0 = top-left).
+- Output multiple frames for presentations (arrange them left-to-right).`;
+
+/* ── API call (collects full response) ── */
+async function callAPI(instruction, selectedText, systemPrompt) {
+  const userContent = selectedText
+    ? 'Context from design:\n"""\n' + selectedText + '\n"""\n\nInstruction: ' + instruction
+    : instruction;
+
+  const res = await fetch('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini',
+      stream: true,
+      temperature: 0.4,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent }
+      ]
+    })
+  });
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = '', full = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += value;
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6);
+      if (data === '[DONE]') return full;
+      try {
+        const token = JSON.parse(data).choices?.[0]?.delta?.content;
+        if (token) { full += token; outEl.textContent = full; }
+      } catch {}
+    }
+  }
+  return full;
+}
+
+/* ── Render design JSON on Figma canvas ── */
+async function renderDesign(framesJson) {
+  const parsed = JSON.parse(framesJson);
+  const frames = parsed.frames || [parsed]; /* support single frame without wrapper */
+
+  await figmaAPI.run(async (figma, { frames }) => {
+    function hex(h) {
+      h = h.replace('#', '');
+      if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+      return { r: parseInt(h.slice(0,2),16)/255, g: parseInt(h.slice(2,4),16)/255, b: parseInt(h.slice(4,6),16)/255 };
+    }
+
+    const created = [];
+    let offsetX = 0;
+
+    for (const fd of frames) {
+      const frame = figma.createFrame();
+      frame.name = fd.name || 'Frame';
+      frame.resize(fd.width || 1280, fd.height || 720);
+      frame.x = offsetX;
+      frame.y = 0;
+      if (fd.fill) frame.fills = [{ type: 'SOLID', color: hex(fd.fill) }];
+
+      for (const c of (fd.children || [])) {
+        if (c.type === 'text') {
+          const style = c.fontStyle || 'Regular';
+          try { await figma.loadFontAsync({ family: 'Inter', style: style }); } catch { await figma.loadFontAsync({ family: 'Inter', style: 'Regular' }); }
+          const t = figma.createText();
+          try { t.fontName = { family: 'Inter', style: style }; } catch { t.fontName = { family: 'Inter', style: 'Regular' }; }
+          t.characters = c.text || '';
+          t.fontSize = c.fontSize || 16;
+          if (c.color) t.fills = [{ type: 'SOLID', color: hex(c.color) }];
+          t.x = c.x || 0;
+          t.y = c.y || 0;
+          if (c.width) { t.resize(c.width, t.height); t.textAutoResize = 'HEIGHT'; }
+          frame.appendChild(t);
+        } else if (c.type === 'rect') {
+          const r = figma.createRectangle();
+          r.resize(c.width || 100, c.height || 100);
+          r.x = c.x || 0;
+          r.y = c.y || 0;
+          if (c.fill) r.fills = [{ type: 'SOLID', color: hex(c.fill) }];
+          if (c.cornerRadius) r.cornerRadius = c.cornerRadius;
+          frame.appendChild(r);
+        } else if (c.type === 'ellipse') {
+          const e = figma.createEllipse();
+          e.resize(c.width || 60, c.height || 60);
+          e.x = c.x || 0;
+          e.y = c.y || 0;
+          if (c.fill) e.fills = [{ type: 'SOLID', color: hex(c.fill) }];
+          frame.appendChild(e);
+        }
+      }
+
+      created.push(frame);
+      offsetX += (fd.width || 1280) + 100;
+    }
+
+    figma.currentPage.selection = created;
+    figma.viewport.scrollAndZoomIntoView(created);
+    figma.notify('Created ' + created.length + ' frame(s)');
+  }, { frames });
+
+  return frames.length;
+}
+
+/* ── Render text on canvas (streaming) ── */
+async function renderTextOnCanvas(instruction, selectedText) {
+  const textPosition = await getTextOffset();
+  let text = '', nodeID = null;
+
+  const userContent = selectedText
+    ? 'Text from design:\n"""\n' + selectedText + '\n"""\n\nInstruction: ' + instruction
+    : instruction;
+
+  const res = await fetch('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'gpt-4o-mini', stream: true, temperature: 0.3,
+      messages: [{ role: 'system', content: TEXT_SYSTEM }, { role: 'user', content: userContent }]
+    })
+  });
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += value;
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6);
+      if (data === '[DONE]') break;
+      try {
+        const token = JSON.parse(data).choices?.[0]?.delta?.content;
+        if (!token) continue;
+        text += token;
+        outEl.textContent = text;
+        nodeID = await figmaAPI.run(async (figma, p) => {
+          let node = figma.getNodeById(p.nodeID || '');
+          if (!node) { node = figma.createText(); node.x = p.pos?.x || 0; node.y = p.pos?.y || 0; }
+          if (node.type !== 'TEXT') return '';
+          const oldH = node.height;
+          await figma.loadFontAsync({ family: 'Inter', style: 'Medium' });
+          node.fontName = { family: 'Inter', style: 'Medium' };
+          node.characters = p.text;
+          if (oldH !== node.height) figma.viewport.scrollAndZoomIntoView([node]);
+          return node.id;
+        }, { nodeID, text, pos: textPosition });
+      } catch {}
+    }
+  }
+  return text;
+}
+
+/* ── UI wiring ── */
+const outEl = document.getElementById('output');
+const statusEl = document.getElementById('status');
+const promptEl = document.getElementById('prompt');
+const btnShow = document.getElementById('btn-show');
+const btnCanvas = document.getElementById('btn-canvas');
+const btnReplace = document.getElementById('btn-replace');
+const allButtons = [...document.querySelectorAll('button')];
+
+function setLoading(on, msg) {
+  allButtons.forEach(b => b.disabled = on);
+  statusEl.textContent = msg || '';
+}
+
+function getInstruction() { return promptEl.value.trim(); }
+
+/* Chips */
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.onclick = () => {
+    promptEl.value = chip.dataset.prompt;
+    currentMode = chip.dataset.mode;
+    promptEl.focus();
+  };
+});
+
+/* Ctrl+Enter */
+promptEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) btnCanvas.click();
+});
+
+/* Auto-detect mode from prompt */
+function detectMode(instruction) {
+  const designWords = /\b(create|generate|design|make|build|draw)\b.*(slide|card|hero|section|screen|frame|layout|wireframe|component|presentation|page|banner|dashboard)/i;
+  if (designWords.test(instruction)) return 'design';
+  return currentMode;
+}
+
+/* Preview */
+btnShow.onclick = async () => {
+  const instruction = getInstruction();
+  if (!instruction) return notify('Type an instruction first.', true);
+  const layers = await getTextForSelection();
+  const mode = detectMode(instruction);
+  const systemPrompt = mode === 'design' ? DESIGN_SYSTEM : TEXT_SYSTEM;
+  setLoading(true, mode === 'design' ? 'Generating design...' : 'Generating...');
+  outEl.style.display = 'block';
+  outEl.textContent = '';
+  try {
+    await callAPI(instruction, layers.join('\n'), systemPrompt);
+  } finally { setLoading(false); }
+};
+
+/* Create on canvas */
+btnCanvas.onclick = async () => {
+  const instruction = getInstruction();
+  if (!instruction) return notify('Type an instruction first.', true);
+  const layers = await getTextForSelection();
+  const mode = detectMode(instruction);
+  outEl.style.display = 'block';
+  outEl.textContent = '';
+
+  if (mode === 'design') {
+    setLoading(true, 'Generating design JSON...');
+    try {
+      const json = await callAPI(instruction, layers.join('\n'), DESIGN_SYSTEM);
+      setLoading(true, 'Rendering on canvas...');
+      const count = await renderDesign(json);
+      setLoading(false, 'Done — ' + count + ' frame(s) created');
+    } catch (err) {
+      setLoading(false, 'Error: ' + err.message);
+      notify('Failed to render design: ' + err.message, true);
+    }
+  } else {
+    setLoading(true, 'Generating text...');
+    try {
+      await renderTextOnCanvas(instruction, layers.join('\n'));
+      setLoading(false, 'Done');
+    } finally { setLoading(false); }
+  }
+};
+
+/* Replace selected text */
+btnReplace.onclick = async () => {
+  const instruction = getInstruction();
+  if (!instruction) return notify('Type an instruction first.', true);
+  const layers = await getTextForSelection();
+  if (!layers.length) return notify('Select a text layer to replace.', true);
+  setLoading(true, 'Generating...');
+  outEl.style.display = 'block';
+  outEl.textContent = '';
+  try {
+    const text = await callAPI(instruction, layers.join('\n'), TEXT_SYSTEM);
+    setLoading(true, 'Replacing text...');
+    await figmaAPI.run(async (figma, p) => {
+      for (const node of figma.currentPage.selection) {
+        if (node.type === 'TEXT') {
+          await figma.loadFontAsync(node.fontName);
+          node.characters = p.text;
+        } else if (node.type === 'STICKY' || node.type === 'SHAPE_WITH_TEXT') {
+          await figma.loadFontAsync(node.text.getRangeFontName(0, 1));
+          node.text.characters = p.text;
+        }
+      }
+      figma.notify('Text replaced');
+    }, { text });
+    setLoading(false, 'Replaced');
+  } catch (err) {
+    setLoading(false, 'Error: ' + err.message);
+  }
+};
+</script>
+</body>
+</html>
