@@ -153,6 +153,12 @@ class LLMService:
     ):
         """Итератор событий agent-first рантайма: reasoning/status/final/done."""
         messages = normalize_chat_messages(messages)
+
+        # Авто-роутинг если model="auto"
+        resolved_model, routing = resolve_model(self._client, model, messages)
+        if routing:
+            _llm_log.info("Auto-routing (stream_agent): %s", routing.reason)
+
         rounds = clamp_agent_tool_rounds(max_tool_rounds)
         _llm_log.debug(
             "stream_agent after normalize max_tool_rounds=%s tools_explicit=%s\n%s",
@@ -162,7 +168,7 @@ class LLMService:
         )
         return stream_agent_chat(
             self._client,
-            model,
+            resolved_model,
             messages,
             tools=tools,
             max_tool_rounds=rounds,
