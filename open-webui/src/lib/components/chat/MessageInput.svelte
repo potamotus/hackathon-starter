@@ -75,6 +75,10 @@
 	import Photo from '../icons/Photo.svelte';
 	import Wrench from '../icons/Wrench.svelte';
 	import Sparkles from '../icons/Sparkles.svelte';
+	import DocumentChartBar from '../icons/DocumentChartBar.svelte';
+	import CodeBracket from '../icons/CodeBracket.svelte';
+	import ChartBar from '../icons/ChartBar.svelte';
+	import DocumentPage from '../icons/DocumentPage.svelte';
 
 	import InputVariablesModal from './MessageInput/InputVariablesModal.svelte';
 	import Voice from '../icons/Voice.svelte';
@@ -121,6 +125,10 @@
 	export let imageGenerationEnabled = false;
 	export let webSearchEnabled = false;
 	export let codeInterpreterEnabled = false;
+	/** Режим API certified-turtles: null = обычный чат; иначе ct_mode в теле запроса */
+	export let ctChatMode: string | null = null;
+	/** Обновление ctChatMode в родителе без bind (стабильнее в Svelte 5) */
+	export let onCtChatModeChange: (v: string | null) => void = () => {};
 
 	export let messageQueue: { id: string; prompt: string; files: any[] }[] = [];
 	export let onQueueSendNow: (id: string) => void = () => {};
@@ -158,8 +166,21 @@
 		selectedFilterIds,
 		imageGenerationEnabled,
 		webSearchEnabled,
-		codeInterpreterEnabled
+		codeInterpreterEnabled,
+		ctChatMode
 	});
+
+	const toggleCtMode = (id: string) => {
+		onCtChatModeChange(ctChatMode === id ? null : id);
+	};
+	const _ctBtnOn = ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20';
+	const _ctBtnOff = 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 ';
+	$: _ctBtnBase = `group p-[7px] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden ${($settings?.highContrastMode ?? false) ? 'm-1' : 'focus:outline-hidden rounded-full'}`;
+	$: _ctBtnDeep = `${_ctBtnBase} ${ctChatMode === 'deep_research' ? _ctBtnOn : _ctBtnOff}`;
+	$: _ctBtnPresentation = `${_ctBtnBase} ${ctChatMode === 'presentation' ? _ctBtnOn : _ctBtnOff}`;
+	$: _ctBtnCoder = `${_ctBtnBase} ${ctChatMode === 'coder' ? _ctBtnOn : _ctBtnOff}`;
+	$: _ctBtnData = `${_ctBtnBase} ${ctChatMode === 'data_analyst' ? _ctBtnOn : _ctBtnOff}`;
+	$: _ctBtnWriter = `${_ctBtnBase} ${ctChatMode === 'writer' ? _ctBtnOn : _ctBtnOff}`;
 
 	const inputVariableHandler = async (text: string): Promise<string> => {
 		inputVariables = extractInputVariables(text);
@@ -481,25 +502,8 @@
 	$: showToolsButton = ($tools ?? []).length > 0 || ($toolServers ?? []).length > 0;
 
 	let showWebSearchButton = false;
-	$: showWebSearchButton =
-		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
-			webSearchCapableModels.length &&
-		$config?.features?.enable_web_search &&
-		($_user.role === 'admin' || $_user?.permissions?.features?.web_search);
-
 	let showImageGenerationButton = false;
-	$: showImageGenerationButton =
-		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
-			imageGenerationCapableModels.length &&
-		$config?.features?.enable_image_generation &&
-		($_user.role === 'admin' || $_user?.permissions?.features?.image_generation);
-
 	let showCodeInterpreterButton = false;
-	$: showCodeInterpreterButton =
-		(atSelectedModel?.id ? [atSelectedModel.id] : selectedModels).length ===
-			codeInterpreterCapableModels.length &&
-		$config?.features?.enable_code_interpreter &&
-		($_user.role === 'admin' || $_user?.permissions?.features?.code_interpreter);
 
 	const scrollToBottom = () => {
 		const element = document.getElementById('messages-container');
@@ -1679,67 +1683,75 @@
 											{/if}
 										{/each}
 
-										{#if webSearchEnabled}
-											<Tooltip content={$i18n.t('Web Search')} placement="top">
-												<button
-													on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
-													type="button"
-													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled ||
-													($settings?.webSearch ?? false) === 'always'
-														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
-														: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
+										<div
+											class="flex flex-wrap items-center gap-1 max-w-[min(100%,42rem)]"
+											role="group"
+											aria-label="GPTHub chat modes"
+										>
+											<button
+												title="Deep Research — многошаговое исследование с web_search/fetch_url"
+												aria-label={ctChatMode === 'deep_research'
+													? 'Отключить Deep Research'
+													: 'Включить Deep Research'}
+												aria-pressed={ctChatMode === 'deep_research'}
+												on:click|preventDefault={() => toggleCtMode('deep_research')}
+												type="button"
+												class={_ctBtnDeep}
+											>
+												<Sparkles className="size-3.5" strokeWidth="2" />
+												<span class="hidden lg:inline text-xs max-w-[6.5rem] truncate"
+													>Deep Research</span
 												>
-													<GlobeAlt className="size-4" strokeWidth="1.75" />
-													<div class="hidden group-hover:block">
-														<XMark className="size-4" strokeWidth="1.75" />
-													</div>
-												</button>
-											</Tooltip>
-										{/if}
-
-										{#if imageGenerationEnabled}
-											<Tooltip content={$i18n.t('Image')} placement="top">
-												<button
-													on:click|preventDefault={() =>
-														(imageGenerationEnabled = !imageGenerationEnabled)}
-													type="button"
-													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {imageGenerationEnabled
-														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-														: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
-												>
-													<Photo className="size-4" strokeWidth="1.75" />
-													<div class="hidden group-hover:block">
-														<XMark className="size-4" strokeWidth="1.75" />
-													</div>
-												</button>
-											</Tooltip>
-										{/if}
-
-										{#if codeInterpreterEnabled}
-											<Tooltip content={$i18n.t('Code Interpreter')} placement="top">
-												<button
-													aria-label={codeInterpreterEnabled
-														? $i18n.t('Disable Code Interpreter')
-														: $i18n.t('Enable Code Interpreter')}
-													aria-pressed={codeInterpreterEnabled}
-													on:click|preventDefault={() =>
-														(codeInterpreterEnabled = !codeInterpreterEnabled)}
-													type="button"
-													class=" group p-[7px] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden {codeInterpreterEnabled
-														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20'
-														: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '} {($settings?.highContrastMode ??
-													false)
-														? 'm-1'
-														: 'focus:outline-hidden rounded-full'}"
-												>
-													<Terminal className="size-3.5" strokeWidth="2" />
-
-													<div class="hidden group-hover:block">
-														<XMark className="size-4" strokeWidth="1.75" />
-													</div>
-												</button>
-											</Tooltip>
-										{/if}
+											</button>
+											<button
+												title="Презентация — генерация .pptx (generate_presentation)"
+												aria-label={ctChatMode === 'presentation'
+													? 'Отключить режим презентации'
+													: 'Режим презентации'}
+												aria-pressed={ctChatMode === 'presentation'}
+												on:click|preventDefault={() => toggleCtMode('presentation')}
+												type="button"
+												class={_ctBtnPresentation}
+											>
+												<DocumentChartBar className="size-3.5" strokeWidth="2" />
+												<span class="hidden lg:inline text-xs max-w-[5rem] truncate">Слайды</span>
+											</button>
+											<button
+												title="Код — Python, execute_python"
+												aria-label={ctChatMode === 'coder' ? 'Отключить режим кода' : 'Режим кода'}
+												aria-pressed={ctChatMode === 'coder'}
+												on:click|preventDefault={() => toggleCtMode('coder')}
+												type="button"
+												class={_ctBtnCoder}
+											>
+												<CodeBracket className="size-3.5" strokeWidth="2" />
+												<span class="hidden lg:inline text-xs max-w-[4rem] truncate">Код</span>
+											</button>
+											<button
+												title="Данные — CSV/XLSX, workspace + Python"
+												aria-label={ctChatMode === 'data_analyst'
+													? 'Отключить режим данных'
+													: 'Режим данных'}
+												aria-pressed={ctChatMode === 'data_analyst'}
+												on:click|preventDefault={() => toggleCtMode('data_analyst')}
+												type="button"
+												class={_ctBtnData}
+											>
+												<ChartBar className="size-3.5" strokeWidth="2" />
+												<span class="hidden lg:inline text-xs max-w-[4rem] truncate">Данные</span>
+											</button>
+											<button
+												title="Текст — эссе и редактура без кода (writer)"
+												aria-label={ctChatMode === 'writer' ? 'Отключить режим текста' : 'Режим текста'}
+												aria-pressed={ctChatMode === 'writer'}
+												on:click|preventDefault={() => toggleCtMode('writer')}
+												type="button"
+												class={_ctBtnWriter}
+											>
+												<DocumentPage className="size-3.5" strokeWidth="2" />
+												<span class="hidden lg:inline text-xs max-w-[4rem] truncate">Текст</span>
+											</button>
+										</div>
 									</div>
 								</div>
 

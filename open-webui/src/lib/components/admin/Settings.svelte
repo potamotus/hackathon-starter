@@ -19,7 +19,6 @@
 	import WebSearch from './Settings/WebSearch.svelte';
 
 	import Evaluations from './Settings/Evaluations.svelte';
-	import Memory from './Settings/Memory.svelte';
 	import CodeExecution from './Settings/CodeExecution.svelte';
 	import Tools from './Settings/Tools.svelte';
 
@@ -41,7 +40,6 @@
 			'connections',
 			'models',
 			'evaluations',
-			'memory',
 			'tools',
 			'documents',
 			'web',
@@ -132,12 +130,6 @@
 			title: 'Evaluations',
 			route: '/admin/settings/evaluations',
 			keywords: ['evaluations', 'feedback', 'rating', 'arena', 'leaderboard', 'preference']
-		},
-		{
-			id: 'memory',
-			title: 'Memory',
-			route: '/admin/settings/memory',
-			keywords: ['memory', 'memories', 'personalization']
 		},
 		{
 			id: 'tools',
@@ -319,7 +311,6 @@
 		<!-- {$i18n.t('Connections')} -->
 		<!-- {$i18n.t('Models')} -->
 		<!-- {$i18n.t('Evaluations')} -->
-		<!-- {$i18n.t('Memory')} -->
 		<!-- {$i18n.t('External Tools')} -->
 		<!-- {$i18n.t('Documents')} -->
 		<!-- {$i18n.t('Web Search')} -->
@@ -379,15 +370,6 @@
 						</svg>
 					{:else if tab.id === 'evaluations'}
 						<DocumentChartBar />
-					{:else if tab.id === 'memory'}
-						<svg
-							xmlns="http://www.w3.org/2000/svg"
-							viewBox="0 0 24 24"
-							fill="currentColor"
-							class="w-4 h-4"
-						>
-							<path d="M11.25 4.533A9.707 9.707 0 0 0 6 3a9.735 9.735 0 0 0-3.25.555.75.75 0 0 0-.5.707v14.25a.75.75 0 0 0 1 .707A8.237 8.237 0 0 1 6 18.75c1.995 0 3.823.707 5.25 1.886V4.533ZM12.75 20.636A8.214 8.214 0 0 1 18 18.75c.966 0 1.89.166 2.75.47a.75.75 0 0 0 1-.708V4.262a.75.75 0 0 0-.5-.707A9.735 9.735 0 0 0 18 3a9.707 9.707 0 0 0-5.25 1.533v16.103Z" />
-						</svg>
 					{:else if tab.id === 'tools'}
 						<svg
 							xmlns="http://www.w3.org/2000/svg"
@@ -543,8 +525,6 @@
 			<Models />
 		{:else if selectedTab === 'evaluations'}
 			<Evaluations />
-		{:else if selectedTab === 'memory'}
-			<Memory />
 		{:else if selectedTab === 'tools'}
 			<Tools />
 		{:else if selectedTab === 'documents'}

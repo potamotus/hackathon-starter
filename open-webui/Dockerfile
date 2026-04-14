@@ -27,9 +27,6 @@ ARG GID=0
 FROM --platform=$BUILDPLATFORM node:22-alpine3.20 AS build
 ARG BUILD_HASH
 
-# Give Vite/Svelte enough heap during the frontend production build.
-ENV NODE_OPTIONS="--max-old-space-size=4096"
-
 WORKDIR /app
 
 # to store git revision in build
@@ -40,6 +37,15 @@ RUN npm ci --force
 
 COPY . .
 ENV APP_BUILD_HASH=${BUILD_HASH}
+
+# Лимит кучи только для vite build: так слой `npm ci` не пересобирается при смене NODE_HEAP_MB.
+# Дефолт 3072 — хост ~8 ГБ RAM: иначе 6144 + Docker VM → SIGKILL при `vite build`.
+# Если сборка падает с «JavaScript heap out of memory» (не SIGKILL), подними NODE_HEAP_MB в compose.
+ARG NODE_HEAP_MB=3072
+ENV NODE_OPTIONS="--max-old-space-size=${NODE_HEAP_MB}"
+# Меньше пиковая память и размер артефакта при vite build (иначе на тесном диске падает Rollup/pip).
+ENV DISABLE_SVELTE_SOURCEMAP=1
+ENV VITE_LOW_MEM_BUILD=1
 RUN npm run build
 
 ######## WebUI backend ########

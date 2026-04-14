@@ -52,6 +52,8 @@
 
 	export let imageGenerationEnabled = false;
 	export let codeInterpreterEnabled = false;
+	export let ctChatMode: string | null = null;
+	export let onCtChatModeChange: (v: string | null) => void = () => {};
 	export let webSearchEnabled = false;
 
 	export let onUpload: Function = (e) => {};
@@ -209,6 +211,8 @@
 					bind:selectedFilterIds
 					bind:imageGenerationEnabled
 					bind:codeInterpreterEnabled
+					ctChatMode={ctChatMode}
+					{onCtChatModeChange}
 					bind:webSearchEnabled
 					bind:atSelectedModel
 					bind:showCommands

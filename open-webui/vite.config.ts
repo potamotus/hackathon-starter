@@ -21,7 +21,13 @@ export default defineConfig({
 		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build')
 	},
 	build: {
-		sourcemap: true
+		// В Docker меньше RAM/диска: DISABLE_SVELTE_SOURCEMAP=1 (см. Dockerfile стадия build).
+		sourcemap: process.env.DISABLE_SVELTE_SOURCEMAP === '1' ? false : true,
+		// На машинах с малым лимитом памяти Docker: VITE_LOW_MEM_BUILD=1 снижает пик RAM при rollup.
+		rollupOptions:
+			process.env.VITE_LOW_MEM_BUILD === '1'
+				? { maxParallelFileOps: 1 }
+				: {}
 	},
 	worker: {
 		format: 'es'

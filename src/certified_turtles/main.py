@@ -54,6 +54,8 @@ def _should_log_backend_request(method: str, path: str) -> bool:
         "/v1/plain/chat/completions",
         "/v1/audio/transcriptions",
         "/v1/plain/audio/transcriptions",
+        "/v1/audio/speech",
+        "/v1/plain/audio/speech",
         "/v1/images/generations",
         "/v1/plain/images/generations",
     ):
@@ -180,11 +182,6 @@ async def memory_page():
     return FileResponse(_STATIC_DIR / "memory.html", media_type="text/html")
 
 
-@app.get("/figma")
-async def figma_plugin_page():
-    return FileResponse(_STATIC_DIR / "figma.html", media_type="text/html")
-
-
 @app.get("/static/{filename}")
 async def serve_static(filename: str):
     path = _STATIC_DIR / filename
@@ -205,13 +202,17 @@ def health() -> dict[str, Any]:
             "google_docs": google_docs_capability_dict(),
             "voice_chat": {
                 "open_webui": True,
-                "hint": "Режим звонка в UI требует AUDIO_STT_ENGINE=openai (не web) и тот же OPENAI_API_BASE_URL, что и чат; ASR: прокси /v1/audio/transcriptions, CT_ASR_MODEL.",
+                "hint": "Режим звонка в UI требует AUDIO_STT_ENGINE=openai и AUDIO_TTS_ENGINE=openai при том же OPENAI_API_BASE_URL, что и чат; ASR: /v1/audio/transcriptions, TTS: /v1/audio/speech.",
             },
             "audio_asr": {
                 "proxy": "/v1/audio/transcriptions",
                 "open_webui_server_stt": "AUDIO_STT_ENGINE=openai при том же OPENAI_API_BASE_URL",
                 "chat_auto_transcribe": "CT_CHAT_AUTO_ASR=1 — расшифровка при вложении аудио в сообщение",
                 "tool": "transcribe_workspace_audio",
+            },
+            "audio_tts": {
+                "proxy": "/v1/audio/speech",
+                "open_webui_server_tts": "AUDIO_TTS_ENGINE=openai при том же OPENAI_API_BASE_URL",
             },
             "vision_vlm": {
                 "multimodal_messages": True,

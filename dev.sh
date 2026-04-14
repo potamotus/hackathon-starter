@@ -3,9 +3,11 @@
 # First run builds open-webui (~10 min). After that — instant startup.
 set -euo pipefail
 
-# Start open-webui (--no-deps skips building/starting the api container)
+# Start open-webui against local API (--no-deps skips api container)
 echo "→ Starting open-webui in Docker..."
-docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --no-deps open-webui
+OPENAI_API_BASE_URL=http://host.docker.internal:8000/v1 \
+CT_API_BASE=http://host.docker.internal:8000 \
+docker compose up -d --no-deps open-webui
 echo "→ open-webui: http://localhost:${OPEN_WEBUI_PORT:-3000}"
 
 # Load .env if present

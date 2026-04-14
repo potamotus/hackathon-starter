@@ -48,16 +48,15 @@ services:
       # GOOGLE_DOCS_CREDENTIALS_JSON: /secrets/google-docs-sa.json
     volumes:
       - generated-files:/data/generated
-      - memory-data:/tmp/certified_turtles_claude_like
       - ./src:/app/src
       # Пример монтирования ключа (рядом с compose: mkdir -p secrets && cp sa.json secrets/google-docs-sa.json):
       # - ./secrets/google-docs-sa.json:/secrets/google-docs-sa.json:ro
     restart: unless-stopped
 
   open-webui:
-    # Сборка из форка: переключатель Deep Research (ct_mode) в UI чата.
+    # Open WebUI: единый источник правок UI в директории open-webui.
     build:
-      context: ./open-webui-fork
+      context: ./open-webui
       dockerfile: Dockerfile
       args:
         # Стабильный кеш: одно и то же значение при `docker compose build` без лишних --build-arg.
@@ -81,14 +80,13 @@ services:
       ENABLE_OLLAMA_API: "False"
       ENABLE_OPENAI_API: "True"
       OPENAI_API_KEY: ${MWS_API_KEY:-}
-      # Агент (тулы): http://api:8000/v1 — второе подключение «просто чат»: http://api:8000/v1/plain (см. README).
-      # Deep Research без раздувания списка моделей: второе подключение Open WebUI с
-      # OPENAI_API_BASE_URL: http://api:8000/v1/m/deep_research (см. prompts/openwebui_modes.md).
-      OPENAI_API_BASE_URL: http://api:8000/v1
+      # По умолчанию Open WebUI ходит в API контейнер. Для локального API можно переопределить env.
+      OPENAI_API_BASE_URL: ${OPENAI_API_BASE_URL:-http://api:8000/v1}
       # Голос: Web STT блокирует «режим звонка» в UI ($config.audio.stt.engine === 'web').
       # Серверный ASR: тот же OPENAI_API_BASE_URL + /v1/audio/transcriptions (прокси api → MWS).
       AUDIO_STT_ENGINE: "openai"
-      AUDIO_TTS_ENGINE: "web"
+      # Серверный TTS: тот же OPENAI_API_BASE_URL + /v1/audio/speech (прокси api → MWS).
+      AUDIO_TTS_ENGINE: "openai"
       ENABLE_AUDIO_CONVERSATION: "True"
       # Все модели из ответа MWS /v1/models видны в селекторе; без ограничений «workspace».
       BYPASS_MODEL_ACCESS_CONTROL: "True"
@@ -103,7 +101,7 @@ services:
       GLOBAL_LOG_LEVEL: ERROR
       HF_HUB_DISABLE_PROGRESS_BARS: "1"
       TRANSFORMERS_VERBOSITY: error
-      CT_API_BASE: http://api:8000
+      CT_API_BASE: ${CT_API_BASE:-http://api:8000}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
@@ -111,4 +109,3 @@ services:
 volumes:
   open-webui-data: {}
   generated-files: {}
-  memory-data: {}

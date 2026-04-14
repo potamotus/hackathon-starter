@@ -139,6 +139,7 @@
 	let imageGenerationEnabled = false;
 	let webSearchEnabled = false;
 	let codeInterpreterEnabled = false;
+	let ctChatMode: string | null = null;
 
 	let showCommands = false;
 
@@ -185,6 +186,7 @@
 		selectedFilterIds = [];
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
+		ctChatMode = null;
 
 		const storageChatInput = sessionStorage.getItem(
 			`chat-input${chatIdProp ? `-${chatIdProp}` : ''}`
@@ -233,6 +235,9 @@
 						webSearchEnabled = input.webSearchEnabled;
 						imageGenerationEnabled = input.imageGenerationEnabled;
 						codeInterpreterEnabled = input.codeInterpreterEnabled;
+						ctChatMode =
+							input.ctChatMode ??
+							(input.deepResearchEnabled ? 'deep_research' : null);
 					}
 				} catch (e) {}
 			} else {
@@ -293,6 +298,7 @@
 		webSearchEnabled = false;
 		imageGenerationEnabled = false;
 		codeInterpreterEnabled = false;
+		// ctChatMode не сбрасываем — иначе пропадает ct_mode в теле запроса при смене/подгрузке модели.
 
 		if (selectedModelIds.filter((id) => id).length > 0) {
 			setDefaults();
@@ -639,6 +645,7 @@
 			webSearchEnabled = false;
 			imageGenerationEnabled = false;
 			codeInterpreterEnabled = false;
+			ctChatMode = null;
 
 			try {
 				const input = JSON.parse(storageChatInput);
@@ -651,6 +658,8 @@
 					webSearchEnabled = input.webSearchEnabled;
 					imageGenerationEnabled = input.imageGenerationEnabled;
 					codeInterpreterEnabled = input.codeInterpreterEnabled;
+					ctChatMode =
+						input.ctChatMode ?? (input.deepResearchEnabled ? 'deep_research' : null);
 				}
 			} catch (e) {}
 		}
@@ -1481,7 +1490,48 @@
 	};
 
 	const chatCompletionEventHandler = async (data, message, chatId) => {
-		const { id, done, choices, content, output, sources, selected_model_id, error, usage } = data;
+		const { id, done, choices, content, output, sources, selected_model_id, error, usage, ct_phase } =
+			data;
+
+		const appendOutputChunk = (kind, text) => {
+			if (!text) {
+				return;
+			}
+			if (!message.output || !Array.isArray(message.output)) {
+				message.output = [];
+			}
+			const lastItem = message.output.length > 0 ? message.output[message.output.length - 1] : null;
+			if (lastItem && lastItem.type === kind) {
+				lastItem.text = `${lastItem.text ?? ''}${text}`;
+			} else {
+				message.output = [...message.output, { type: kind, text }];
+			}
+		};
+
+		const appendStatusChunk = (text) => {
+			const cleaned = (text ?? '').trim();
+			if (!cleaned) {
+				return;
+			}
+			const item = {
+				action: 'agent_status',
+				description: cleaned,
+				done: false,
+				hidden: false
+			};
+			if (message?.statusHistory) {
+				const lastStatus =
+					message.statusHistory.length > 0
+						? message.statusHistory[message.statusHistory.length - 1]
+						: null;
+				if (lastStatus?.action === item.action && lastStatus?.description === item.description) {
+					return;
+				}
+				message.statusHistory.push(item);
+			} else {
+				message.statusHistory = [item];
+			}
+		};
 
 		// Store raw OR-aligned output items from backend
 		if (output) {
@@ -1502,7 +1552,21 @@
 				message.content += choices[0]?.message?.content;
 			} else {
 				// Stream response
-				let value = choices[0]?.delta?.content ?? '';
+				const delta = choices[0]?.delta ?? {};
+				let value = delta?.content ?? '';
+				if (delta?.reasoning) {
+					appendOutputChunk('reasoning', delta.reasoning);
+				}
+				if (delta?.tool_status) {
+					appendStatusChunk(delta.tool_status);
+					appendOutputChunk('status', delta.tool_status);
+				}
+				if (delta?.final) {
+					appendOutputChunk('final', delta.final);
+				}
+				if (ct_phase === 'error' && delta?.error) {
+					message.error = { content: delta.error };
+				}
 				if (message.content == '' && value == '\n') {
 					console.log('Empty response');
 				} else {
@@ -2117,6 +2181,7 @@
 					(server, idx) => toolServerIds.includes(idx) || toolServerIds.includes(server?.id)
 				),
 				features: getFeatures(),
+				...(ctChatMode ? { ct_mode: ctChatMode } : {}),
 				variables: {
 					...getPromptVariables(
 						$user?.name,
@@ -2700,6 +2765,8 @@
 									bind:selectedFilterIds
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
+									ctChatMode={ctChatMode}
+									onCtChatModeChange={(v) => (ctChatMode = v)}
 									bind:webSearchEnabled
 									bind:atSelectedModel
 									bind:showCommands
@@ -2751,11 +2818,6 @@
 									}}
 								/>
 
-								<div
-									class="absolute bottom-1 text-xs text-gray-500 text-center line-clamp-1 right-0 left-0"
-								>
-									<!-- {$i18n.t('LLMs can make mistakes. Verify important information.')} -->
-								</div>
 							</div>
 						{:else}
 							<div class="flex items-center h-full">
@@ -2770,6 +2832,8 @@
 									bind:selectedFilterIds
 									bind:imageGenerationEnabled
 									bind:codeInterpreterEnabled
+									ctChatMode={ctChatMode}
+									onCtChatModeChange={(v) => (ctChatMode = v)}
 									bind:webSearchEnabled
 									bind:atSelectedModel
 									bind:showCommands

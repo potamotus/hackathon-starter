@@ -10,7 +10,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from certified_turtles.agents.json_agent_protocol import (
     extract_user_visible_assistant_text,
@@ -241,6 +241,38 @@ async def _audio_transcriptions_impl(
         ) from e
 
 
+async def _audio_speech_impl(body: dict[str, Any]) -> Response:
+    svc = _service()
+    text = body.get("input")
+    if not isinstance(text, str) or not text.strip():
+        raise HTTPException(status_code=400, detail="Поле `input` обязательно и должно быть строкой")
+    model = body.get("model")
+    if not isinstance(model, str) or not model.strip():
+        raise HTTPException(status_code=400, detail="Поле `model` обязательно и должно быть строкой")
+
+    payload: dict[str, Any] = {
+        "model": model.strip(),
+        "input": text,
+        "voice": str(body.get("voice") or "alloy"),
+    }
+    # OpenAI-совместимые опции; MWS может игнорировать неподдерживаемые поля.
+    if isinstance(body.get("response_format"), str) and body["response_format"].strip():
+        payload["response_format"] = body["response_format"].strip()
+    if isinstance(body.get("speed"), (int, float)):
+        payload["speed"] = body["speed"]
+    if isinstance(body.get("instructions"), str) and body["instructions"].strip():
+        payload["instructions"] = body["instructions"]
+
+    try:
+        audio_bytes, content_type = await asyncio.to_thread(svc.client.audio_speech, payload)
+    except MWSGPTError as e:
+        raise HTTPException(
+            status_code=http_status_for_mws_error(e),
+            detail={"message": str(e), "status": e.status, "body": e.body},
+        ) from e
+    return Response(content=audio_bytes, media_type=content_type or "audio/mpeg")
+
+
 @router.post("/v1/audio/transcriptions")
 async def audio_transcriptions(
     file: UploadFile = File(...),
@@ -263,6 +295,30 @@ async def audio_transcriptions_plain_prefix(
 ) -> Any:
     """Тот же ASR при base URL …/v1/plain."""
     return await _audio_transcriptions_impl(file, model, language, prompt, response_format)
+
+
+@router.post("/v1/audio/speech")
+async def audio_speech(request: Request) -> Response:
+    """OpenAI-совместимый TTS: прокси на MWS /v1/audio/speech."""
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Ожидается JSON: {e}") from e
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Ожидается JSON-объект")
+    return await _audio_speech_impl(body)
+
+
+@router.post("/v1/plain/audio/speech")
+async def audio_speech_plain_prefix(request: Request) -> Response:
+    """Тот же TTS при base URL …/v1/plain."""
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=400, detail=f"Ожидается JSON: {e}") from e
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Ожидается JSON-объект")
+    return await _audio_speech_impl(body)
 
 
 async def _images_generations_from_body(body: dict[str, Any]) -> Any:
@@ -399,10 +455,6 @@ def _agent_sse_stream(
     *,
     max_tool_rounds: int,
     extra: dict[str, Any],
-    runtime: Any = None,
-    session_id: str = "",
-    scope_id: str = "",
-    prepared_messages: list[dict[str, Any]] | None = None,
 ):
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
@@ -414,7 +466,6 @@ def _agent_sse_stream(
             if etype == "done":
                 result = event.get("result") if isinstance(event.get("result"), dict) else {}
                 final_output = result.get("output") if isinstance(result.get("output"), list) else cumulative_output
-                final_messages = result.get("messages") or (prepared_messages or messages)
                 yield _sse_line(
                     model,
                     cid,
@@ -424,15 +475,6 @@ def _agent_sse_stream(
                     extra={"done": True, "output": final_output},
                 )
                 yield "data: [DONE]\n\n"
-                if runtime and session_id:
-                    runtime.after_response(
-                        svc.client,
-                        model=model,
-                        prepared_messages=prepared_messages or messages,
-                        final_messages=final_messages,
-                        session_id=session_id,
-                        scope_id=scope_id,
-                    )
                 return
             if etype == "reasoning_stream":
                 text = str(event.get("text") or "")
@@ -649,6 +691,8 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
 
     stream = bool(body.get("stream"))
     max_agent_tokens = body.get("max_agent_tokens")
+    if not isinstance(max_agent_tokens, int) or max_agent_tokens <= 0:
+        max_agent_tokens = get_max_agent_tokens()
     extra = {k: v for k, v in body.items() if k not in _PASS_THROUGH_IGNORE}
     contract_mode = _request_contract_mode(body)
     session_id, scope_id = _request_ids(body)
@@ -656,18 +700,15 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
     max_tool_rounds = clamp_agent_tool_rounds(body.get("max_tool_rounds", 10))
 
     svc = _service()
-    # MWS: qwen-image в /v1/models есть, но chat/completions для этих моделей → 404; генерация только images/generations.
+    # MWS: qwen-image в /v1/models есть, но chat/completions для этих моделей -> 404; генерация только images/generations.
     if _is_mws_image_chat_model(model):
         return await _chat_completions_mws_image_model(
             svc, model, messages, stream=stream, body=body
         )
 
-    runtime = runtime_from_env()
-    contract_mode = _request_contract_mode(body)
     ow_meta_plain = _openwebui_meta_task_forces_plain(messages)
     ow_tool_router_plain = _openwebui_tool_router_forces_plain(messages)
     is_conversation = not (ow_meta_plain or ow_tool_router_plain or contract_mode in {"router", "meta_task"})
-    max_tool_rounds = clamp_agent_tool_rounds(body.get("max_tool_rounds"))
     if contract_mode == "agent":
         plain = bool(force_plain)
     else:
@@ -678,7 +719,7 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
             or ow_meta_plain
             or ow_tool_router_plain
         )
-    session_id, scope_id = _request_ids(body)
+
     if plain:
         prepared = prepare_chat_request(body, messages, for_agent=False)
         messages = prepared.messages
@@ -696,6 +737,7 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
                 prepared.forced_agent_id,
                 max_tool_rounds,
             )
+
     prepared_messages = runtime.prepare_messages(
         svc.client,
         model=model,
@@ -717,7 +759,9 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
         stream,
         max_agent_tokens,
         sorted(extra.keys()),
-        summarize_messages(prepared_messages, preview=400) if isinstance(prepared_messages, list) else str(type(prepared_messages)),
+        summarize_messages(prepared_messages, preview=400)
+        if isinstance(prepared_messages, list)
+        else str(type(prepared_messages)),
     )
     if stream and not plain:
         return StreamingResponse(
@@ -727,10 +771,6 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
                 messages,
                 max_tool_rounds=max_tool_rounds,
                 extra=extra,
-                runtime=runtime,
-                session_id=session_id,
-                scope_id=scope_id,
-                prepared_messages=prepared_messages,
             ),
             media_type="text/event-stream",
         )
@@ -774,14 +814,15 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
         "chat_completions response (visible for UI) preview=\n%s",
         debug_clip(_final_assistant_content(completion)),
     )
-    runtime.after_response(
-        svc.client,
-        model=model,
-        prepared_messages=prepared_messages,
-        final_messages=final_messages,
-        session_id=session_id,
-        scope_id=scope_id,
-    )
+    if is_conversation:
+        runtime.after_response(
+            svc.client,
+            model=model,
+            prepared_messages=prepared_messages,
+            final_messages=final_messages,
+            session_id=session_id,
+            scope_id=scope_id,
+        )
     completion = _completion_with_visible_markdown(completion)
     if not stream:
         return completion
