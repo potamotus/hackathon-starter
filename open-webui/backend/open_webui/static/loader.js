@@ -104,6 +104,105 @@
     };
   }
 
+  /* ── MWS Tables injection (Settings > Connections page) ── */
+  function injectMwsTables() {
+    if (document.getElementById('ct-mws-tables')) return;
+    var allEls = document.querySelectorAll('div');
+    var directConnDiv = null;
+    for (var i = 0; i < allEls.length; i++) {
+      var el = allEls[i];
+      if (el.children.length === 0 && el.textContent.trim() === 'Direct Connections') {
+        directConnDiv = el.closest('.my-2');
+        break;
+      }
+    }
+    if (!directConnDiv) return;
+
+    // Load current value
+    fetch(API_BASE + '/api/v1/mws-tables/config')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        var input = document.getElementById('ct-mws-token-input');
+        if (input && d.MWS_TABLES_API_TOKEN) input.value = d.MWS_TABLES_API_TOKEN;
+      })
+      .catch(function() {});
+
+    var section = document.createElement('div');
+    section.id = 'ct-mws-tables';
+    section.className = 'my-2';
+    section.innerHTML =
+      '<div class="flex justify-between items-center text-sm">' +
+        '<div class="font-medium">MWS Tables</div>' +
+        '<span id="ct-mws-status" class="text-xs font-medium" style="display:none"></span>' +
+      '</div>' +
+      '<div class="mt-1 text-xs text-gray-400 dark:text-gray-500">' +
+        'API-токен для подключения к MWS Tables.' +
+      '</div>' +
+      '<div class="mt-2.5">' +
+        '<div class="text-xs font-medium mb-1">API Token</div>' +
+        '<div class="flex gap-2">' +
+          '<input id="ct-mws-token-input" ' +
+            'class="w-full rounded-lg py-1.5 px-4 text-sm bg-gray-50 dark:text-gray-300 dark:bg-gray-850 outline-hidden" ' +
+            'type="password" placeholder="Введите токен MWS Tables">' +
+          '<button id="ct-mws-verify-btn" ' +
+            'class="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition" ' +
+            'type="button">Verify</button>' +
+        '</div>' +
+      '</div>';
+
+    var hr = document.createElement('hr');
+    hr.className = 'border-gray-100/30 dark:border-gray-850/30 my-2';
+    var parent = directConnDiv.parentNode;
+    parent.insertBefore(hr, directConnDiv);
+    parent.insertBefore(section, directConnDiv);
+
+    document.getElementById('ct-mws-verify-btn').addEventListener('click', function() {
+      var token = document.getElementById('ct-mws-token-input').value.trim();
+      var status = document.getElementById('ct-mws-status');
+      if (!token) {
+        status.textContent = 'Введите токен';
+        status.style.display = '';
+        status.style.color = '#ef4444';
+        setTimeout(function() { status.style.display = 'none'; }, 3000);
+        return;
+      }
+      status.textContent = 'Проверка...';
+      status.style.display = '';
+      status.style.color = '#9ca3af';
+      // Save token first, then verify
+      fetch(API_BASE + '/api/v1/mws-tables/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ MWS_TABLES_API_TOKEN: token })
+      })
+        .then(function() {
+          return fetch(API_BASE + '/api/v1/mws-tables/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: token })
+          });
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d.ok) {
+            status.textContent = 'Подключено (' + (d.spaces ? d.spaces.length : 0) + ' spaces)';
+            status.style.color = '#22c55e';
+          } else {
+            status.textContent = d.error || 'Ошибка';
+            status.style.color = '#ef4444';
+          }
+          status.style.display = '';
+          setTimeout(function() { status.style.display = 'none'; }, 5000);
+        })
+        .catch(function() {
+          status.textContent = 'Ошибка сети';
+          status.style.display = '';
+          status.style.color = '#ef4444';
+          setTimeout(function() { status.style.display = 'none'; }, 3000);
+        });
+    });
+  }
+
   /* ── Agent Settings injection (Settings > Connections page) ── */
   function injectAgentSettings() {
     if (document.getElementById('ct-agent-settings')) return;
@@ -189,6 +288,9 @@
     _agentSettingsInterval = setInterval(function() {
       if (!document.getElementById('ct-agent-settings')) {
         injectAgentSettings();
+      }
+      if (!document.getElementById('ct-mws-tables')) {
+        injectMwsTables();
       }
     }, 200);
   }

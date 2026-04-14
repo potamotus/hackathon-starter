@@ -157,7 +157,7 @@ class LLMService:
         # Авто-роутинг если model="auto"
         resolved_model, routing = resolve_model(self._client, model, messages)
         if routing:
-            _llm_log.info("Auto-routing (stream_agent): %s", routing.reason)
+            _llm_log.info("Auto-routing (stream): %s", routing.reason)
 
         rounds = clamp_agent_tool_rounds(max_tool_rounds)
         _llm_log.debug(

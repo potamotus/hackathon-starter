@@ -4,6 +4,7 @@ import asyncio
 import copy
 import json
 import os
+import threading
 import time
 import uuid
 from typing import Any
@@ -398,6 +399,10 @@ def _agent_sse_stream(
     *,
     max_tool_rounds: int,
     extra: dict[str, Any],
+    runtime: Any = None,
+    session_id: str = "",
+    scope_id: str = "",
+    prepared_messages: list[dict[str, Any]] | None = None,
 ):
     cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
@@ -409,6 +414,7 @@ def _agent_sse_stream(
             if etype == "done":
                 result = event.get("result") if isinstance(event.get("result"), dict) else {}
                 final_output = result.get("output") if isinstance(result.get("output"), list) else cumulative_output
+                final_messages = result.get("messages") or (prepared_messages or messages)
                 yield _sse_line(
                     model,
                     cid,
@@ -418,6 +424,15 @@ def _agent_sse_stream(
                     extra={"done": True, "output": final_output},
                 )
                 yield "data: [DONE]\n\n"
+                if runtime and session_id:
+                    runtime.after_response(
+                        svc.client,
+                        model=model,
+                        prepared_messages=prepared_messages or messages,
+                        final_messages=final_messages,
+                        session_id=session_id,
+                        scope_id=scope_id,
+                    )
                 return
             if etype == "reasoning_stream":
                 text = str(event.get("text") or "")
@@ -633,8 +648,12 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
         raise HTTPException(status_code=400, detail="Поле `messages` обязательно и не должно быть пустым")
 
     stream = bool(body.get("stream"))
-    max_agent_tokens = get_max_agent_tokens()
+    max_agent_tokens = body.get("max_agent_tokens")
     extra = {k: v for k, v in body.items() if k not in _PASS_THROUGH_IGNORE}
+    contract_mode = _request_contract_mode(body)
+    session_id, scope_id = _request_ids(body)
+    runtime = runtime_from_env()
+    max_tool_rounds = clamp_agent_tool_rounds(body.get("max_tool_rounds", 10))
 
     svc = _service()
     # MWS: qwen-image в /v1/models есть, но chat/completions для этих моделей → 404; генерация только images/generations.
@@ -708,7 +727,17 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
                 messages,
                 max_tool_rounds=max_tool_rounds,
                 extra=extra,
+                runtime=runtime,
+                session_id=session_id,
+                scope_id=scope_id,
+                prepared_messages=prepared_messages,
             ),
+            media_type="text/event-stream",
+        )
+
+    if stream and plain:
+        return StreamingResponse(
+            _upstream_sse_stream(svc, model, messages, runtime, session_id, scope_id, prepared_messages, extra),
             media_type="text/event-stream",
         )
 
@@ -745,15 +774,14 @@ async def _chat_completions_from_body(body: dict[str, Any], *, force_plain: bool
         "chat_completions response (visible for UI) preview=\n%s",
         debug_clip(_final_assistant_content(completion)),
     )
-    if is_conversation:
-        runtime.after_response(
-            svc.client,
-            model=model,
-            prepared_messages=prepared_messages,
-            final_messages=final_messages,
-            session_id=session_id,
-            scope_id=scope_id,
-        )
+    runtime.after_response(
+        svc.client,
+        model=model,
+        prepared_messages=prepared_messages,
+        final_messages=final_messages,
+        session_id=session_id,
+        scope_id=scope_id,
+    )
     completion = _completion_with_visible_markdown(completion)
     if not stream:
         return completion
