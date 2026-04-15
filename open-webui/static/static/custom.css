@@ -202,7 +202,7 @@ input[type="search"],
 }
 
 .dark #sidebar {
-  background: #000000 !important;
+  background: #0a0a0a !important;
 }
 
 /* Primary Buttons */
@@ -284,7 +284,7 @@ input[type="search"],
   color: var(--mts-text-secondary) !important;
 }
 
-/* Chat input */
+/* Chat input padding */
 .dark #chat-input-container {
   padding-left: 0.75rem !important;
 }
@@ -329,6 +329,22 @@ input[type="search"],
   border-color: var(--mts-border) !important;
 }
 
+/* Search input */
+.dark #chat-search {
+  border: 1px solid var(--mts-border) !important;
+  border-radius: 12px !important;
+}
+
+.dark #chat-search:focus-within {
+  border-color: var(--mts-red) !important;
+  box-shadow: 0 0 0 1px var(--mts-red) !important;
+}
+
+.dark #chat-search input:focus {
+  box-shadow: none !important;
+  border: none !important;
+}
+
 /* Dropdowns */
 .dark [class*="dropdown"],
 .dark .menu,
@@ -357,11 +373,22 @@ input[type="search"],
   border-radius: 24px !important;
 }
 
+/* Modal inner content */
+.dark [role="dialog"] .bg-white {
+  background: var(--mts-surface) !important;
+}
+
 /* Tooltips */
 .dark [role="tooltip"] {
   background: var(--mts-surface-elevated) !important;
   border: 1px solid var(--mts-border) !important;
   border-radius: 12px !important;
+}
+
+/* Sidebar chat items hover */
+.dark #sidebar a:hover,
+.dark #sidebar button:hover {
+  background: var(--mts-surface) !important;
 }
 
 /* Selection */
@@ -377,4 +404,16 @@ input[type="search"],
 
 .dark a:not([class]):hover {
   color: var(--mts-red-hover);
+}
+
+/* Code blocks */
+.dark pre {
+  background: var(--mts-surface) !important;
+  border: 1px solid var(--mts-border) !important;
+  border-radius: 12px !important;
+}
+
+/* Settings menu text fix */
+.dark .text-gray-300 {
+  color: var(--mts-text-secondary) !important;
 }

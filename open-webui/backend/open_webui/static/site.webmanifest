@@ -1,6 +1,6 @@
 {
-  "name": "Open WebUI",
-  "short_name": "WebUI",
+  "name": "GPTHub",
+  "short_name": "GPTHub",
   "icons": [
     {
       "src": "/static/web-app-manifest-192x192.png",
