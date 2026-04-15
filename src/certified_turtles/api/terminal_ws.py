@@ -18,6 +18,7 @@ import shutil
 import signal
 import struct
 import subprocess
+import sys
 import termios
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
@@ -31,14 +32,17 @@ def _tmux_bin() -> str | None:
     return shutil.which("tmux")
 
 
-def _ensure_tmux_session(name: str):
+def _ensure_tmux_session(name: str, cmd: list[str] | None = None):
     """Create tmux session if it doesn't exist."""
     tmux = _tmux_bin()
     if not tmux:
         return
     r = subprocess.run([tmux, "has-session", "-t", name], capture_output=True)
     if r.returncode != 0:
-        subprocess.run([tmux, "new-session", "-d", "-s", name, "-x", "120", "-y", "40"])
+        args = [tmux, "new-session", "-d", "-s", name, "-x", "120", "-y", "40"]
+        if cmd:
+            args += cmd
+        subprocess.run(args)
 
 
 @router.websocket("/ws/terminal")
@@ -50,10 +54,16 @@ async def terminal_ws(
 
     tmux = _tmux_bin()
 
+    # GPTHub Code CLI command
+    gpthub_cmd = [sys.executable, "-m", "certified_turtles.cli"]
+
     if session and tmux:
-        # Attach to shared tmux session
-        _ensure_tmux_session(session)
+        # Attach to shared tmux session running GPTHub Code
+        _ensure_tmux_session(session, cmd=gpthub_cmd)
         cmd = [tmux, "attach-session", "-t", session]
+    elif session == "gpthub":
+        # No tmux — run GPTHub Code directly
+        cmd = gpthub_cmd
     else:
         cmd = [os.environ.get("SHELL", "/bin/bash")]
 
