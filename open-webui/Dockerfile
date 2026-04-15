@@ -29,8 +29,7 @@ ARG BUILD_HASH
 
 WORKDIR /app
 
-# to store git revision in build
-RUN apk add --no-cache git
+# git not needed — BUILD_HASH passed as arg
 
 COPY package.json package-lock.json ./
 RUN npm ci --force
