@@ -1703,54 +1703,6 @@
 													>Deep Research</span
 												>
 											</button>
-											<button
-												title="Презентация — генерация .pptx (generate_presentation)"
-												aria-label={ctChatMode === 'presentation'
-													? 'Отключить режим презентации'
-													: 'Режим презентации'}
-												aria-pressed={ctChatMode === 'presentation'}
-												on:click|preventDefault={() => toggleCtMode('presentation')}
-												type="button"
-												class={_ctBtnPresentation}
-											>
-												<DocumentChartBar className="size-3.5" strokeWidth="2" />
-												<span class="hidden lg:inline text-xs max-w-[5rem] truncate">Слайды</span>
-											</button>
-											<button
-												title="Код — Python, execute_python"
-												aria-label={ctChatMode === 'coder' ? 'Отключить режим кода' : 'Режим кода'}
-												aria-pressed={ctChatMode === 'coder'}
-												on:click|preventDefault={() => toggleCtMode('coder')}
-												type="button"
-												class={_ctBtnCoder}
-											>
-												<CodeBracket className="size-3.5" strokeWidth="2" />
-												<span class="hidden lg:inline text-xs max-w-[4rem] truncate">Код</span>
-											</button>
-											<button
-												title="Данные — CSV/XLSX, workspace + Python"
-												aria-label={ctChatMode === 'data_analyst'
-													? 'Отключить режим данных'
-													: 'Режим данных'}
-												aria-pressed={ctChatMode === 'data_analyst'}
-												on:click|preventDefault={() => toggleCtMode('data_analyst')}
-												type="button"
-												class={_ctBtnData}
-											>
-												<ChartBar className="size-3.5" strokeWidth="2" />
-												<span class="hidden lg:inline text-xs max-w-[4rem] truncate">Данные</span>
-											</button>
-											<button
-												title="Текст — эссе и редактура без кода (writer)"
-												aria-label={ctChatMode === 'writer' ? 'Отключить режим текста' : 'Режим текста'}
-												aria-pressed={ctChatMode === 'writer'}
-												on:click|preventDefault={() => toggleCtMode('writer')}
-												type="button"
-												class={_ctBtnWriter}
-											>
-												<DocumentPage className="size-3.5" strokeWidth="2" />
-												<span class="hidden lg:inline text-xs max-w-[4rem] truncate">Текст</span>
-											</button>
 										</div>
 									</div>
 								</div>

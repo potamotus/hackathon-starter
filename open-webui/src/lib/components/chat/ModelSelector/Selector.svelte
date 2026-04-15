@@ -441,13 +441,14 @@
 	>
 		<slot>
 			{#if searchEnabled}
-				<div class="flex items-center gap-2.5 px-4.5 mt-3.5 mb-1.5">
+				<div class="px-4.5 mt-3.5 mb-1.5">
+				  <div class="flex items-center gap-2.5 rounded-xl border border-gray-200 dark:border-gray-700 px-2.5">
 					<Search className="size-4" strokeWidth="2.5" />
 
 					<input
 						id="model-search-input"
 						bind:value={searchValue}
-						class="w-full text-sm bg-transparent outline-hidden"
+						class="w-full text-sm py-1.5 bg-transparent outline-hidden"
 						placeholder={searchPlaceholder}
 						autocomplete="off"
 						aria-label={$i18n.t('Search In Models')}
@@ -471,6 +472,7 @@
 							item?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
 						}}
 					/>
+				  </div>
 				</div>
 			{/if}
 

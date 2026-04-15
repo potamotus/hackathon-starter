@@ -27,7 +27,9 @@
 	import WrenchAlt from '../icons/WrenchAlt.svelte';
 	import Face from '../icons/Face.svelte';
 	import AppNotification from '../icons/AppNotification.svelte';
-	import UserBadgeCheck from '../icons/UserBadgeCheck.svelte';
+	import BookOpen from '../icons/BookOpen.svelte';
+	import Memory from './Settings/Memory.svelte';
+
 
 	const i18n = getContext('i18n');
 
@@ -128,6 +130,18 @@
 				'userprofile',
 				'webhook url',
 				'webhookurl'
+			]
+		},
+		{
+			id: 'memory',
+			title: 'Memory',
+			keywords: [
+				'memory',
+				'memories',
+				'remember',
+				'personalization',
+				'context',
+				'knowledge'
 			]
 		},
 		{
@@ -531,6 +545,30 @@
 								</div>
 								<div class=" self-center">{$i18n.t('Account')}</div>
 							</button>
+						{:else if tabId === 'memory'}
+							<button
+								role="tab"
+								aria-controls="tab-memory"
+								aria-selected={selectedTab === 'memory'}
+								class={`px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none flex text-left transition
+								${
+									selectedTab === 'memory'
+										? ($settings?.highContrastMode ?? false)
+											? 'dark:bg-gray-800 bg-gray-200'
+											: ''
+										: ($settings?.highContrastMode ?? false)
+											? 'hover:bg-gray-200 dark:hover:bg-gray-800'
+											: 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white'
+								}`}
+								on:click={() => {
+									selectedTab = 'memory';
+								}}
+							>
+								<div class=" self-center mr-2">
+									<BookOpen strokeWidth="2" />
+								</div>
+								<div class=" self-center">{$i18n.t('Memory')}</div>
+							</button>
 						{:else if tabId === 'about'}
 							<button
 								role="tab"
@@ -561,25 +599,6 @@
 					<div class="text-center text-gray-500 mt-4">
 						{$i18n.t('No results found')}
 					</div>
-				{/if}
-				{#if $user?.role === 'admin'}
-					<a
-						href="/admin/settings"
-						draggable="false"
-						class="px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none md:mt-auto flex select-none text-left transition {$settings?.highContrastMode
-							? 'hover:bg-gray-200 dark:hover:bg-gray-800'
-							: 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white'}"
-						on:click={async (e) => {
-							e.preventDefault();
-							await goto('/admin/settings');
-							show = false;
-						}}
-					>
-						<div class=" self-center mr-2">
-							<UserBadgeCheck strokeWidth="2" />
-						</div>
-						<div class=" self-center">{$i18n.t('Admin Settings')}</div>
-					</a>
 				{/if}
 			</div>
 			<div class="flex-1 px-3.5 md:pl-0 md:pr-4.5 md:min-h-[42rem] max-h-[42rem]">
@@ -635,6 +654,8 @@
 							toast.success($i18n.t('Settings saved successfully!'));
 						}}
 					/>
+				{:else if selectedTab === 'memory'}
+					<Memory />
 				{:else if selectedTab === 'about'}
 					<About />
 				{/if}

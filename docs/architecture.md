@@ -440,13 +440,9 @@ certified-turtles/
 │   │   ├── agent_streaming_system.md   # Базовый промпт агента
 │   │   ├── subagents/                  # Промпты саб-агентов
 │   │   └── modes/                      # Промпты режимов
-│   ├── static/                         # HTML (memory, figma)
+│   ├── static/                         # HTML (memory, terminal)
 │   └── assets/                         # Шаблон презентации
 ├── open-webui/                         # Форк Open WebUI
-├── figma-plugin/                       # Figma-плагин (legacy Next.js)
-│   └── plugin/
-│       ├── manifest.json               # Манифест плагина
-│       └── dist/code.js                # Собранный код (→ :8000/figma)
 ├── scripts/
 │   ├── bootstrap_gpt_researcher_venv.sh
 │   ├── gpt_researcher_worker.py

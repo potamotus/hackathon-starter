@@ -1,9 +1,7 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
 	import { onMount, getContext } from 'svelte';
-	import { goto } from '$app/navigation';
 
-	import { user } from '$lib/stores';
 	import { imageGenerations, imageEdits } from '$lib/apis/images';
 
 	import Spinner from '$lib/components/common/Spinner.svelte';
@@ -113,10 +111,6 @@
 	};
 
 	onMount(async () => {
-		if ($user?.role !== 'admin') {
-			await goto('/');
-			return;
-		}
 		loaded = true;
 	});
 </script>

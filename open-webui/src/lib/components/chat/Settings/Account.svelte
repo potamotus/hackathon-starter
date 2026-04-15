@@ -147,7 +147,7 @@
 
 							<div class="flex-1">
 								<input
-									class="w-full text-sm dark:text-gray-300 bg-transparent outline-hidden"
+									class="w-full text-sm dark:text-gray-300 bg-transparent outline-hidden rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2"
 									type="text"
 									bind:value={name}
 									aria-label={$i18n.t('Name')}
@@ -162,7 +162,7 @@
 
 							<div class="flex-1">
 								<Textarea
-									className="w-full text-sm dark:text-gray-300 bg-transparent outline-hidden"
+									className="w-full text-sm dark:text-gray-300 bg-transparent outline-hidden rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2"
 									minSize={60}
 									bind:value={bio}
 									ariaLabel={$i18n.t('Bio')}
@@ -176,7 +176,7 @@
 
 							<div class="flex-1">
 								<select
-									class="w-full text-sm dark:text-gray-300 bg-transparent outline-hidden"
+									class="w-full text-sm dark:text-gray-300 bg-transparent outline-hidden rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2"
 									bind:value={_gender}
 									aria-label={$i18n.t('Gender')}
 									on:change={(e) => {
@@ -199,7 +199,7 @@
 
 							{#if _gender === 'custom'}
 								<input
-									class="w-full text-sm dark:text-gray-300 bg-transparent outline-hidden mt-1"
+									class="w-full text-sm dark:text-gray-300 bg-transparent outline-hidden rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2 mt-1"
 									type="text"
 									required
 									aria-label={$i18n.t('Custom Gender')}
@@ -214,7 +214,7 @@
 
 							<div class="flex-1">
 								<input
-									class="w-full text-sm dark:text-gray-300 dark:placeholder:text-gray-300 bg-transparent outline-hidden"
+									class="w-full text-sm dark:text-gray-300 dark:placeholder:text-gray-300 bg-transparent outline-hidden rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2"
 									type="date"
 									aria-label={$i18n.t('Birth Date')}
 									bind:value={dateOfBirth}
@@ -234,7 +234,7 @@
 
 					<div class="flex-1">
 						<input
-							class="w-full text-sm outline-hidden"
+							class="w-full text-sm outline-hidden rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2"
 							type="url"
 							placeholder={$i18n.t('Enter your webhook URL')}
 							aria-label={$i18n.t('Notification Webhook')}

@@ -54,14 +54,16 @@
 	>
 		<slot>
 			{#if searchEnabled}
-				<div class="flex items-center gap-2.5 px-5 mt-3.5 mb-3">
+				<div class="px-5 mt-3.5 mb-3">
+				  <div class="flex items-center gap-2.5 rounded-xl border border-gray-200 dark:border-gray-700 px-2.5">
 					<Search className="size-4" strokeWidth="2.5" />
 
 					<input
 						bind:value={searchValue}
-						class="w-full text-sm bg-transparent outline-hidden"
+						class="w-full text-sm py-1.5 bg-transparent outline-hidden"
 						placeholder={searchPlaceholder}
 					/>
+				  </div>
 				</div>
 
 				<hr class="border-gray-100/30 dark:border-gray-850/30" />

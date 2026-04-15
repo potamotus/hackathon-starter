@@ -18,7 +18,8 @@ export default defineConfig({
 	],
 	define: {
 		APP_VERSION: JSON.stringify(process.env.npm_package_version),
-		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build')
+		APP_BUILD_HASH: JSON.stringify(process.env.APP_BUILD_HASH || 'dev-build'),
+		CT_API_BASE: JSON.stringify(process.env.PUBLIC_API_BASE_URL || 'http://localhost:8000')
 	},
 	build: {
 		// В Docker меньше RAM/диска: DISABLE_SVELTE_SOURCEMAP=1 (см. Dockerfile стадия build).

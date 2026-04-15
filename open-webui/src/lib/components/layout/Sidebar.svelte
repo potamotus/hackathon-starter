@@ -64,6 +64,8 @@
 	import Sidebar from '../icons/Sidebar.svelte';
 	import PinnedModelList from './Sidebar/PinnedModelList.svelte';
 	import Note from '../icons/Note.svelte';
+	import Photo from '../icons/Photo.svelte';
+	import Terminal from '../icons/Terminal.svelte';
 	import { slide } from 'svelte/transition';
 	import HotkeyHint from '../common/HotkeyHint.svelte';
 
@@ -745,6 +747,21 @@
 					</Tooltip>
 				</div>
 
+				<div class="">
+					<Tooltip content={$i18n.t('Images')} placement="right">
+						<a
+							class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+							href="/images"
+							draggable="false"
+							aria-label={$i18n.t('Images')}
+						>
+							<div class=" self-center flex items-center justify-center size-9">
+								<Photo className="size-4.5" />
+							</div>
+						</a>
+					</Tooltip>
+				</div>
+
 				<div>
 					<Tooltip content={$i18n.t('Search')} placement="right">
 						<button
@@ -762,6 +779,28 @@
 								<Search className="size-4.5" />
 							</div>
 						</button>
+					</Tooltip>
+				</div>
+
+				<div>
+					<Tooltip content="GPTHub Code" placement="right">
+						<a
+							class=" cursor-pointer flex rounded-xl hover:bg-gray-100 dark:hover:bg-gray-850 transition group"
+							href="/gpthub-code"
+							on:click={async (e) => {
+								e.stopImmediatePropagation();
+								e.preventDefault();
+
+								goto('/gpthub-code');
+								itemClickHandler();
+							}}
+							draggable="false"
+							aria-label="GPTHub Code"
+						>
+							<div class=" self-center flex items-center justify-center size-9">
+								<Terminal className="size-4.5" />
+							</div>
+						</a>
 					</Tooltip>
 				</div>
 
@@ -944,6 +983,24 @@
 					</div>
 
 					<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+						<a
+							id="sidebar-images-button"
+							class="group grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition outline-none"
+							href="/images"
+							draggable="false"
+							aria-label={$i18n.t('Images')}
+						>
+							<div class="self-center">
+								<Photo className="size-4.5" strokeWidth="2" />
+							</div>
+
+							<div class="flex flex-1 self-center translate-y-[0.5px]">
+								<div class=" self-center text-sm font-primary">{$i18n.t('Images')}</div>
+							</div>
+						</a>
+					</div>
+
+					<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
 						<button
 							id="sidebar-search-button"
 							class="group grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition outline-none"
@@ -962,6 +1019,25 @@
 							</div>
 							<HotkeyHint name="search" className=" group-hover:visible invisible" />
 						</button>
+					</div>
+
+					<div class="px-[0.4375rem] flex justify-center text-gray-800 dark:text-gray-200">
+						<a
+							id="sidebar-gpthub-code-button"
+							class="group grow flex items-center space-x-3 rounded-2xl px-2.5 py-2 hover:bg-gray-100 dark:hover:bg-gray-900 transition outline-none"
+							href="/gpthub-code"
+							on:click={itemClickHandler}
+							draggable="false"
+							aria-label="GPTHub Code"
+						>
+							<div class="self-center">
+								<Terminal className="size-4.5" strokeWidth="2" />
+							</div>
+
+							<div class="flex flex-1 self-center translate-y-[0.5px]">
+								<div class="self-center text-sm font-primary">GPTHub Code</div>
+							</div>
+						</a>
 					</div>
 
 					{#if ($config?.features?.enable_notes ?? false) && ($user?.role === 'admin' || ($user?.permissions?.features?.notes ?? true))}

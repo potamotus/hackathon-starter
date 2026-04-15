@@ -15,6 +15,5 @@ echo "→ open-webui: http://localhost:${OPEN_WEBUI_PORT:-3000}"
 
 # Run API locally with hot-reload
 echo "→ Starting API on :8000 (Ctrl+C to stop)..."
-echo "→ Figma plugin UI: http://localhost:8000/figma"
 exec uv run uvicorn certified_turtles.main:app \
   --reload --host 0.0.0.0 --port 8000
