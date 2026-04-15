@@ -20,6 +20,7 @@ class TaskType(Enum):
     KNOWLEDGE = "knowledge"
     INSTRUCTION = "instruction"
     VISION = "vision"
+    IMAGE_GEN = "image_gen"
     UNKNOWN = "unknown"
 
 
@@ -28,6 +29,7 @@ class ModelType(Enum):
     LLM = "llm"
     VLM = "vlm"
     ASR = "asr"
+    IMAGE_GEN = "image_gen"
     EMBEDDING = "embedding"
 
 
@@ -144,6 +146,14 @@ MODELS: dict[str, ModelSpec] = {
         specializations=(TaskType.CODE,),
         fallback="gpt-oss-120b",
     ),
+    "qwen3-32b": ModelSpec(
+        id="qwen3-32b",
+        model_type=ModelType.LLM,
+        speed=50.0,
+        quality=84.0,
+        specializations=(TaskType.CHAT,),
+        fallback="gpt-oss-120b",
+    ),
     "Qwen3-235B-A22B-Instruct-2507-FP8": ModelSpec(
         id="Qwen3-235B-A22B-Instruct-2507-FP8",
         model_type=ModelType.LLM,
@@ -165,7 +175,7 @@ MODELS: dict[str, ModelSpec] = {
     "qwen2.5-vl": ModelSpec(
         id="qwen2.5-vl",
         model_type=ModelType.VLM,
-        speed=30.0,  # примерная оценка
+        speed=30.0,
         quality=85.0,
         specializations=(TaskType.VISION,),
         fallback="qwen2.5-vl-72b",
@@ -195,6 +205,24 @@ MODELS: dict[str, ModelSpec] = {
         fallback=None,
     ),
 
+    # === Image Generation ===
+    "qwen-image": ModelSpec(
+        id="qwen-image",
+        model_type=ModelType.IMAGE_GEN,
+        speed=5.0,
+        quality=85.0,
+        specializations=(TaskType.IMAGE_GEN,),
+        fallback="qwen-image-lightning",
+    ),
+    "qwen-image-lightning": ModelSpec(
+        id="qwen-image-lightning",
+        model_type=ModelType.IMAGE_GEN,
+        speed=15.0,
+        quality=75.0,
+        specializations=(TaskType.IMAGE_GEN,),
+        fallback="qwen-image",
+    ),
+
     # === ASR ===
     "whisper-turbo-local": ModelSpec(
         id="whisper-turbo-local",
@@ -212,6 +240,32 @@ MODELS: dict[str, ModelSpec] = {
         specializations=(),
         fallback=None,
     ),
+
+    # === Embedding ===
+    "bge-m3": ModelSpec(
+        id="bge-m3",
+        model_type=ModelType.EMBEDDING,
+        speed=200.0,
+        quality=85.0,
+        specializations=(),
+        fallback="BAAI/bge-multilingual-gemma2",
+    ),
+    "BAAI/bge-multilingual-gemma2": ModelSpec(
+        id="BAAI/bge-multilingual-gemma2",
+        model_type=ModelType.EMBEDDING,
+        speed=150.0,
+        quality=88.0,
+        specializations=(),
+        fallback="qwen3-embedding-8b",
+    ),
+    "qwen3-embedding-8b": ModelSpec(
+        id="qwen3-embedding-8b",
+        model_type=ModelType.EMBEDDING,
+        speed=180.0,
+        quality=86.0,
+        specializations=(),
+        fallback="bge-m3",
+    ),
 }
 
 # Модели по умолчанию для каждого типа задачи
@@ -222,6 +276,7 @@ DEFAULT_MODELS: dict[TaskType, str] = {
     TaskType.KNOWLEDGE: "glm-4.6-357b",
     TaskType.INSTRUCTION: "gemma-3-27b-it",
     TaskType.VISION: "qwen2.5-vl",
+    TaskType.IMAGE_GEN: "gpt-oss-20b",  # текстовая модель вызовет тул generate_image
     TaskType.UNKNOWN: "gpt-oss-120b",
 }
 

@@ -173,7 +173,7 @@
 	const toggleCtMode = (id: string) => {
 		onCtChatModeChange(ctChatMode === id ? null : id);
 	};
-	const _ctBtnOn = ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-700/10 border border-sky-200/40 dark:border-sky-500/20';
+	const _ctBtnOn = ' text-red-500 dark:text-red-400 bg-red-50 hover:bg-red-100 dark:bg-red-400/10 dark:hover:bg-red-700/10 border border-red-200/40 dark:border-red-500/20';
 	const _ctBtnOff = 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 ';
 	$: _ctBtnBase = `group p-[7px] flex gap-1.5 items-center text-sm transition-colors duration-300 max-w-full overflow-hidden ${($settings?.highContrastMode ?? false) ? 'm-1' : 'focus:outline-hidden rounded-full'}`;
 	$: _ctBtnDeep = `${_ctBtnBase} ${ctChatMode === 'deep_research' ? _ctBtnOn : _ctBtnOff}`;

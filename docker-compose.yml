@@ -85,8 +85,12 @@ services:
       # Голос: Web STT блокирует «режим звонка» в UI ($config.audio.stt.engine === 'web').
       # Серверный ASR: тот же OPENAI_API_BASE_URL + /v1/audio/transcriptions (прокси api → MWS).
       AUDIO_STT_ENGINE: "openai"
+      AUDIO_STT_OPENAI_API_BASE_URL: "http://api:8000/v1"
+      AUDIO_STT_OPENAI_API_KEY: ${MWS_API_KEY:-}
+      AUDIO_STT_MODEL: ${CT_ASR_MODEL:-whisper-medium}
       # Серверный TTS: тот же OPENAI_API_BASE_URL + /v1/audio/speech (прокси api → MWS).
-      AUDIO_TTS_ENGINE: "openai"
+      AUDIO_TTS_ENGINE: ""
+      AUDIO_TTS_VOICE: "Google русский"
       ENABLE_AUDIO_CONVERSATION: "True"
       # Все модели из ответа MWS /v1/models видны в селекторе; без ограничений «workspace».
       BYPASS_MODEL_ACCESS_CONTROL: "True"

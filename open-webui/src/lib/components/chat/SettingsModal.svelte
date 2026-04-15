@@ -78,296 +78,8 @@
 				'webui settings'
 			]
 		},
-		{
-			id: 'interface',
-			title: 'Interface',
-			keywords: [
-				'allow user location',
-				'allow voice interruption in call',
-				'allowuserlocation',
-				'allowvoiceinterruptionincall',
-				'always collapse codeblocks',
-				'always collapse code blocks',
-				'always expand details',
-				'always on web search',
-				'always play notification sound',
-				'alwayscollapsecodeblocks',
-				'alwaysexpanddetails',
-				'alwaysonwebsearch',
-				'alwaysplaynotificationsound',
-				'android',
-				'auto chat tags',
-				'auto copy response to clipboard',
-				'auto title',
-				'autochattags',
-				'autocopyresponsetoclipboard',
-				'autotitle',
-				'beta',
-				'call',
-				'chat background image',
-				'chat bubble ui',
-				'chat direction',
-				'chat tags autogen',
-				'chat tags autogeneration',
-				'chat ui',
-				'chatbackgroundimage',
-				'chatbubbleui',
-				'chatdirection',
-				'chat tags autogeneration',
-				'chattagsautogeneration',
-				'chatui',
-				'copy formatted text',
-				'copyformattedtext',
-				'default model',
-				'defaultmodel',
-				'design',
-				'detect artifacts automatically',
-				'detectartifactsautomatically',
-				'display emoji in call',
-				'display username',
-				'displayemojiincall',
-				'displayusername',
-				'enter key behavior',
-				'enterkeybehavior',
-				'expand mode',
-				'expandmode',
-				'file',
-				'followup autogeneration',
-				'followupautogeneration',
-				'fullscreen',
-				'fullwidthmode',
-				'full width mode',
-				'haptic feedback',
-				'hapticfeedback',
-				'high contrast mode',
-				'highcontrastmode',
-				'iframe sandbox allow forms',
-				'iframe sandbox allow same origin',
-				'iframesandboxallowforms',
-				'iframesandboxallowsameorigin',
-				'imagecompression',
-				'image compression',
-				'imagemaxcompressionsize',
-				'image max compression size',
-				'interface customization',
-				'interface options',
-				'interfacecustomization',
-				'interfaceoptions',
-				'landing page mode',
-				'landingpagemode',
-				'layout',
-				'left to right',
-				'left-to-right',
-				'lefttoright',
-				'ltr',
-				'paste large text as file',
-				'pastelargetextasfile',
-				'reset background',
-				'resetbackground',
-				'response auto copy',
-				'responseautocopy',
-				'rich text input for chat',
-				'richtextinputforchat',
-				'right to left',
-				'right-to-left',
-				'righttoleft',
-				'rtl',
-				'scroll behavior',
-				'scroll on branch change',
-				'scrollbehavior',
-				'scrollonbranchchange',
-				'select model',
-				'selectmodel',
-				'settings',
-				'show username',
-				'showusername',
-				'stream large chunks',
-				'streamlargechunks',
-				'stylized pdf export',
-				'stylizedpdfexport',
-				'title autogeneration',
-				'titleautogeneration',
-				'toast notifications for new updates',
-				'toastnotificationsfornewupdates',
-				'upload background',
-				'uploadbackground',
-				'user interface',
-				'user location access',
-				'userinterface',
-				'userlocationaccess',
-				'vibration',
-				'voice control',
-				'voicecontrol',
-				'widescreen mode',
-				'widescreenmode',
-				'whatsnew',
-				'whats new',
-				'websearchinchat',
-				'web search in chat'
-			]
-		},
-		{
-			id: 'connections',
-			title: 'Connections',
-			keywords: [
-				'addconnection',
-				'add connection',
-				'manageconnections',
-				'manage connections',
-				'manage direct connections',
-				'managedirectconnections',
-				'settings'
-			]
-		},
-		{
-			id: 'tools',
-			title: 'External Tools',
-			keywords: [
-				'addconnection',
-				'add connection',
-				'managetools',
-				'manage tools',
-				'manage tool servers',
-				'managetoolservers',
-				'settings'
-			]
-		},
-
-		{
-			id: 'personalization',
-			title: 'Personalization',
-			keywords: [
-				'account preferences',
-				'account settings',
-				'accountpreferences',
-				'accountsettings',
-				'custom settings',
-				'customsettings',
-				'experimental',
-				'memories',
-				'memory',
-				'personalization',
-				'personalize',
-				'personal settings',
-				'personalsettings',
-				'profile',
-				'user preferences',
-				'userpreferences'
-			]
-		},
-		{
-			id: 'audio',
-			title: 'Audio',
-			keywords: [
-				'audio config',
-				'audio control',
-				'audio features',
-				'audio input',
-				'audio output',
-				'audio playback',
-				'audio voice',
-				'audioconfig',
-				'audiocontrol',
-				'audiofeatures',
-				'audioinput',
-				'audiooutput',
-				'audioplayback',
-				'audiovoice',
-				'auto playback response',
-				'autoplaybackresponse',
-				'auto transcribe',
-				'autotranscribe',
-				'instant auto send after voice transcription',
-				'instantautosendaftervoicetranscription',
-				'language',
-				'non local voices',
-				'nonlocalvoices',
-				'save settings',
-				'savesettings',
-				'set voice',
-				'setvoice',
-				'sound settings',
-				'soundsettings',
-				'speech config',
-				'speech mode',
-				'speech playback speed',
-				'speech rate',
-				'speech recognition',
-				'speech settings',
-				'speech speed',
-				'speech synthesis',
-				'speech to text engine',
-				'speechconfig',
-				'speechmode',
-				'speechplaybackspeed',
-				'speechrate',
-				'speechrecognition',
-				'speechsettings',
-				'speechspeed',
-				'speechsynthesis',
-				'speechtotextengine',
-				'speedch playback rate',
-				'speedchplaybackrate',
-				'stt settings',
-				'sttsettings',
-				'text to speech engine',
-				'text to speech',
-				'textospeechengine',
-				'texttospeech',
-				'texttospeechvoice',
-				'text to speech voice',
-				'voice control',
-				'voice modes',
-				'voice options',
-				'voice playback',
-				'voice recognition',
-				'voice speed',
-				'voicecontrol',
-				'voicemodes',
-				'voiceoptions',
-				'voiceplayback',
-				'voicerecognition',
-				'voicespeed',
-				'volume'
-			]
-		},
-		{
-			id: 'data_controls',
-			title: 'Data Controls',
-			keywords: [
-				'archive all chats',
-				'archive chats',
-				'archiveallchats',
-				'archivechats',
-				'archived chats',
-				'archivedchats',
-				'chat activity',
-				'chat history',
-				'chat settings',
-				'chatactivity',
-				'chathistory',
-				'chatsettings',
-				'conversation activity',
-				'conversation history',
-				'conversationactivity',
-				'conversationhistory',
-				'conversations',
-				'convos',
-				'delete all chats',
-				'delete chats',
-				'deleteallchats',
-				'deletechats',
-				'export chats',
-				'exportchats',
-				'import chats',
-				'importchats',
-				'message activity',
-				'message archive',
-				'message history',
-				'messagearchive',
-				'messagehistory'
-			]
-		},
+		/* Interface tab removed */
+		/* Removed tabs: connections, tools, personalization, audio, data_controls */
 		{
 			id: 'account',
 			title: 'Account',
@@ -580,7 +292,7 @@
 	});
 </script>
 
-<Modal size="2xl" bind:show>
+<Modal size="lg" bind:show>
 	<div class="text-gray-700 dark:text-gray-100 mx-1">
 		<div class=" flex justify-between dark:text-gray-300 px-4 md:px-4.5 pt-4.5 pb-0.5 md:pb-2.5">
 			<div class=" text-lg font-medium self-center">{$i18n.t('Settings')}</div>
@@ -636,7 +348,7 @@
 											: ''
 										: ($settings?.highContrastMode ?? false)
 											? 'hover:bg-gray-200 dark:hover:bg-gray-800'
-											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'
+											: 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white'
 								}`}
 								on:click={() => {
 									selectedTab = 'general';
@@ -660,7 +372,7 @@
 											: ''
 										: ($settings?.highContrastMode ?? false)
 											? 'hover:bg-gray-200 dark:hover:bg-gray-800'
-											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'
+											: 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white'
 								}`}
 								on:click={() => {
 									selectedTab = 'interface';
@@ -685,7 +397,7 @@
 											: ''
 										: ($settings?.highContrastMode ?? false)
 											? 'hover:bg-gray-200 dark:hover:bg-gray-800'
-											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'
+											: 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white'
 								}`}
 									on:click={() => {
 										selectedTab = 'connections';
@@ -711,7 +423,7 @@
 											: ''
 										: ($settings?.highContrastMode ?? false)
 											? 'hover:bg-gray-200 dark:hover:bg-gray-800'
-											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'
+											: 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white'
 								}`}
 									on:click={() => {
 										selectedTab = 'tools';
@@ -736,7 +448,7 @@
 											: ''
 										: ($settings?.highContrastMode ?? false)
 											? 'hover:bg-gray-200 dark:hover:bg-gray-800'
-											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'
+											: 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white'
 								}`}
 								on:click={() => {
 									selectedTab = 'personalization';
@@ -760,7 +472,7 @@
 											: ''
 										: ($settings?.highContrastMode ?? false)
 											? 'hover:bg-gray-200 dark:hover:bg-gray-800'
-											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'
+											: 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white'
 								}`}
 								on:click={() => {
 									selectedTab = 'audio';
@@ -784,7 +496,7 @@
 											: ''
 										: ($settings?.highContrastMode ?? false)
 											? 'hover:bg-gray-200 dark:hover:bg-gray-800'
-											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'
+											: 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white'
 								}`}
 								on:click={() => {
 									selectedTab = 'data_controls';
@@ -808,7 +520,7 @@
 											: ''
 										: ($settings?.highContrastMode ?? false)
 											? 'hover:bg-gray-200 dark:hover:bg-gray-800'
-											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'
+											: 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white'
 								}`}
 								on:click={() => {
 									selectedTab = 'account';
@@ -832,7 +544,7 @@
 											: ''
 										: ($settings?.highContrastMode ?? false)
 											? 'hover:bg-gray-200 dark:hover:bg-gray-800'
-											: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'
+											: 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white'
 								}`}
 								on:click={() => {
 									selectedTab = 'about';
@@ -856,7 +568,7 @@
 						draggable="false"
 						class="px-0.5 md:px-2.5 py-1 min-w-fit rounded-xl flex-1 md:flex-none md:mt-auto flex select-none text-left transition {$settings?.highContrastMode
 							? 'hover:bg-gray-200 dark:hover:bg-gray-800'
-							: 'text-gray-300 dark:text-gray-600 hover:text-gray-700 dark:hover:text-white'}"
+							: 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white'}"
 						on:click={async (e) => {
 							e.preventDefault();
 							await goto('/admin/settings');
