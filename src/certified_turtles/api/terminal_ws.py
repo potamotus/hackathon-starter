@@ -54,8 +54,9 @@ async def terminal_ws(
 
     tmux = _tmux_bin()
 
-    # GPTHub Code CLI command
-    gpthub_cmd = [sys.executable, "-m", "certified_turtles.cli"]
+    # GPTHub Code CLI command — use uv run to ensure venv is active
+    _uv = shutil.which("uv") or "uv"
+    gpthub_cmd = [_uv, "run", "python", "-m", "certified_turtles.cli"]
 
     if session and tmux:
         # Attach to shared tmux session running GPTHub Code
